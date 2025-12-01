@@ -1,37 +1,54 @@
-// server.js - ES Modules 版本
-import { createServer } from 'http';
+import express from "express";
+import { createRequestHandler } from "@react-router/express";
 
-console.log('=== Starting Shopify App (ES Modules) ===');
+const app = express();
 
-const port = process.env.PORT || 3000;
-const host = process.env.HOST || '0.0.0.0';
-
-const server = createServer((req, res) => {
-  if (req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ 
-      status: 'ok', 
-      timestamp: new Date().toISOString(),
-      app: 'On Shopfront Sync'
-    }));
-    return;
-  }
-  
-  res.writeHead(200, { 'Content-Type': 'text/html' });
-  res.end(`
-    <!DOCTYPE html>
-    <html>
-      <head><title>Shopify App</title></head>
-      <body>
-        <h1>Shopify App Running</h1>
-        <p>Production Environment</p>
-        <p>URL: ${process.env.APP_URL || 'Not set'}</p>
-      </body>
-    </html>
-  `);
+// 健康检查
+app.get("/health", (req, res) => {
+  res.json({ 
+    status: "ok", 
+    app: "On Shopfront Sync",
+    time: new Date().toISOString()
+  });
 });
 
-server.listen(port, host, () => {
-  console.log(`✅ Server running on http://${host}:${port}`);
-  console.log(`📦 Environment: ${process.env.NODE_ENV || 'production'}`);
+// 静态文件
+app.use(express.static("public"));
+
+// 核心：加载并运行你的React Router应用
+let requestHandler;
+try {
+  // 导入构建后的应用
+  const build = await import("./build/index.js");
+  console.log("✅ React Router应用加载成功");
+  requestHandler = createRequestHandler({ build });
+} catch (error) {
+  console.error("❌ 加载失败:", error.message);
+  
+  // 开发环境友好提示
+  app.all("*", (req, res) => {
+    res.send(`
+      <div style="padding: 20px; font-family: sans-serif;">
+        <h1>🚧 应用未构建</h1>
+        <p>请先运行构建命令：</p>
+        <pre style="background: #f0f0f0; padding: 10px;">npm run build</pre>
+        <p>或者开发模式：</p>
+        <pre style="background: #f0f0f0; padding: 10px;">npm run dev</pre>
+        <p><small>错误：${error.message}</small></p>
+      </div>
+    `);
+  });
+}
+
+// 应用所有路由到React Router
+if (requestHandler) {
+  app.all("*", requestHandler);
+}
+
+// 启动服务器
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+  console.log("=== Shopify App 已启动 ===");
+  console.log(`✅ 访问：http://localhost:${port}`);
+  console.log(`✅ 健康检查：http://localhost:${port}/health`);
 });

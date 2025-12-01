@@ -2,9 +2,10 @@
   "name": "on-shopfront-sync",
   "private": true,
   "scripts": {
-    "build": "echo 'Build skipped' && exit 0",
+    "build": "react-router build && tsc --noEmit",
     "dev": "node server.js",
     "start": "node server.js",
+    "postbuild": "cp -r public build/ 2>/dev/null || true",
     "deploy": "shopify app deploy",
     "setup": "prisma generate && prisma migrate deploy",
     "lint": "eslint --ignore-path .gitignore --cache --cache-location ./node_modules/.cache/eslint .",
