@@ -5,7 +5,7 @@
     "build": "react-router build",
     "dev": "node server.js",
     "start": "node server.js",
-    "postbuild": "if exist public xcopy public build\\public /E /I 2>nul || true",
+    "postbuild": "echo Build completed successfully",
     "deploy": "shopify app deploy",
     "setup": "prisma generate && prisma migrate deploy",
     "lint": "eslint --ignore-path .gitignore --cache --cache-location ./node_modules/.cache/eslint .",
