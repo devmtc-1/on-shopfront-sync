@@ -1,14 +1,18 @@
+// app/routes/shopify-import.jsx
 import { json } from "@remix-run/node";
-import fetch from "node-fetch";
-import { getShopifyToken } from "../utils/shopify.server"; // 你需要在 utils 创建 Shopify token 方法
 
 export async function action({ request }) {
   try {
+    // 只能在action中使用process.env
     const shopifyAccessToken = process.env.SHOPIFY_ACCESS_TOKEN; 
-    const shopDomain = process.env.SHOPIFY_DOMAIN; // 例如 yourstore.myshopify.com
+    const shopDomain = process.env.SHOPIFY_DOMAIN;
+
+    if (!shopifyAccessToken || !shopDomain) {
+      return json({ error: "Shopify环境变量未配置" }, { status: 500 });
+    }
 
     const body = await request.json();
-    const products = body.products; // 从前端传过来的 Shopfront 产品
+    const products = body.products;
 
     const results = [];
 
@@ -42,4 +46,9 @@ export async function action({ request }) {
     console.error(err);
     return json({ error: err.message }, { status: 500 });
   }
+}
+
+// 添加一个空的默认导出，让React Router知道这是有效的路由
+export default function ShopifyImport() {
+  return null;
 }
