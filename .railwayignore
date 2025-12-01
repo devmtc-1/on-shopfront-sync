@@ -1,0 +1,17 @@
+[build]
+builder = "nixpacks"
+installCommand = "npm ci"
+buildCommand = "npm run build"
+
+[deploy]
+startCommand = "npm start"
+port = 3000
+healthcheckPath = "/health"
+
+[variables]
+NODE_ENV = "production"
+PORT = "3000"
+
+# 禁止 Railway 自动创建 Dockerfile
+[railway]
+disableAutoDetect = true

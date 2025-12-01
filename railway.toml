@@ -1,0 +1,11 @@
+[build] 
+builder = "nixpacks" 
+installCommand = "npm ci" 
+ 
+[deploy] 
+startCommand = "npm run dev" 
+port = 3000 
+ 
+[variables] 
+NODE_ENV = "production" 
+PORT = "3000" 
