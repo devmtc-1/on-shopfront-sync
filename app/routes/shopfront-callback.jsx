@@ -37,7 +37,7 @@ export async function loader({ request }) {
         client_id: "eXYJMyar5WOhLu67vgU5M1rVgvEYuETa",
         client_secret: "h8gNsZQP8NWIpjfWLV15oME1oCC4m8r1Tp8KcXmr",
         redirect_uri:
-          "https://on-shopfront-sync-production.up.railway.app/shopfront-callback",
+          "https://on-shopfront-sync.vercel.app/shopfront-callback",
         grant_type: "authorization_code",
         code,
       }),

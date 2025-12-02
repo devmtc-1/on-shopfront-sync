@@ -20,7 +20,7 @@ export async function loader({ request }) {
   authUrl.searchParams.set("client_id", "eXYJMyar5WOhLu67vgU5M1rVgvEYuETa");
   authUrl.searchParams.set(
     "redirect_uri",
-    "https://on-shopfront-sync-production.up.railway.app/shopfront-callback"
+    "https://on-shopfront-sync.vercel.app/shopfront-callback"
   );
   authUrl.searchParams.set("response_type", "code");
   authUrl.searchParams.set("state", state);
