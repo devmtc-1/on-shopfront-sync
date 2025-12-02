@@ -179,4 +179,4 @@ export async function importProductToShopify(product) {
   }
 }
 
-export { shopifyRequest };
+export { shopifyRequest, buildShopifyProductPayload };
