@@ -1,6 +1,10 @@
+// server.js
 import express from "express";
 import { createRequestHandler } from "@react-router/express";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 
 // 健康检查
@@ -13,42 +17,44 @@ app.get("/health", (req, res) => {
 });
 
 // 静态文件
-app.use(express.static("public"));
+app.use(express.static(join(__dirname, "public")));
+app.use("/assets", express.static(join(__dirname, "build/client")));
 
-// 核心：加载并运行你的React Router应用
+// 加载构建文件 - 修复路径！
 let requestHandler;
 try {
-  // 导入构建后的应用
-  const build = await import("./build/index.js");
-  console.log("✅ React Router应用加载成功");
+  console.log("🔍 加载构建文件: ./build/server/index.js");
+  
+  // ✅ 正确的路径
+  const build = await import("./build/server/index.js");
+  console.log("✅ 构建文件加载成功");
+  
   requestHandler = createRequestHandler({ build });
+  
 } catch (error) {
   console.error("❌ 加载失败:", error.message);
   
-  // 开发环境友好提示
+  // 简单回退
   app.all("*", (req, res) => {
     res.send(`
-      <div style="padding: 20px; font-family: sans-serif;">
-        <h1>🚧 应用未构建</h1>
-        <p>请先运行构建命令：</p>
-        <pre style="background: #f0f0f0; padding: 10px;">npm run build</pre>
-        <p>或者开发模式：</p>
-        <pre style="background: #f0f0f0; padding: 10px;">npm run dev</pre>
-        <p><small>错误：${error.message}</small></p>
+      <div style="padding: 20px;">
+        <h1>应用启动错误</h1>
+        <p>${error.message}</p>
+        <p>构建路径应该是: ./build/server/index.js</p>
       </div>
     `);
   });
 }
 
-// 应用所有路由到React Router
 if (requestHandler) {
   app.all("*", requestHandler);
 }
 
-// 启动服务器
 const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log("=== Shopify App 已启动 ===");
-  console.log(`✅ 访问：http://localhost:${port}`);
-  console.log(`✅ 健康检查：http://localhost:${port}/health`);
+const host = process.env.HOST || "0.0.0.0";
+
+app.listen(port, host, () => {
+  console.log("=== Shopify App 启动 ===");
+  console.log(`✅ 服务器运行在: http://${host}:${port}`);
+  console.log(`📦 构建目录: ${__dirname}/build`);
 });
