@@ -2,7 +2,7 @@
   "name": "on-shopfront-sync",
   "private": true,
   "scripts": {
-    "build": "prisma generate && prisma migrate deploy && react-router build",
+    "build": "prisma generate && prisma db push --accept-data-loss && react-router build",
     "dev": "node server.js",
     "start": "node server.js",
     "postbuild": "echo Build completed successfully",
@@ -14,7 +14,7 @@
     "graphql-codegen": "graphql-codegen",
     "vite": "vite",
     "typecheck": "react-router typegen && tsc --noEmit",
-    "vercel-build": "prisma generate && prisma migrate deploy && react-router build",
+    "vercel-build": "prisma generate && prisma db push --accept-data-loss && react-router build",
     "vercel-dev": "prisma generate && node server.js",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
