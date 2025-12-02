@@ -28,3 +28,15 @@ model Session {
 
   @@index([shop])
 }
+
+model ShopfrontToken {
+  id            String   @id @default(cuid())
+  vendor        String   @unique
+  access_token  String
+  refresh_token String
+  expires_in    Int?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  
+  @@index([vendor])
+}
