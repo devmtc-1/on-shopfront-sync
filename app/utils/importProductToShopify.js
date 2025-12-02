@@ -152,56 +152,59 @@ export async function importProductToShopify(product) {
   
   // 如果有已存在的产品，无论当前状态如何都要处理（更新或归档）
   if (existing) {
-    const payload = buildShopifyProductPayload(product);
-    const updatePayload = {
-      product: {
-        id: existing.id,
-        title: product.name,
-        body_html: product.description || "",
-        vendor: product.brand?.name || "Unknown",
-        product_type: product.category?.name || "",
-        tags: [`SFID:${product.id}`],
-        status: product.status === "ACTIVE" ? "active" : "archived", // 更新状态
-        images: payload.product.images,
-      },
-    };
+    console.log(`⏭️  第一次手动同步，暂时跳过重复产品: ${product.name}`);
 
-    const resp = await shopifyRequest(`products/${existing.id}.json`, "PUT", updatePayload);
-    const shopifyProduct = resp.product;
+
+    // const payload = buildShopifyProductPayload(product);
+    // const updatePayload = {
+    //   product: {
+    //     id: existing.id,
+    //     title: product.name,
+    //     body_html: product.description || "",
+    //     vendor: product.brand?.name || "Unknown",
+    //     product_type: product.category?.name || "",
+    //     tags: [`SFID:${product.id}`],
+    //     status: product.status === "ACTIVE" ? "active" : "archived", // 更新状态
+    //     images: payload.product.images,
+    //   },
+    // };
+
+    // const resp = await shopifyRequest(`products/${existing.id}.json`, "PUT", updatePayload);
+    // const shopifyProduct = resp.product;
     
-    if (product.status === "ACTIVE") {
-      console.log("🔄 更新活跃产品:", existing.id, product.name);
-      // 更新 variants
-      for (const shopifyVariant of shopifyProduct.variants) {
-        const matchingPrice = product.prices.find(p => {
-          const barcode = p.barcode || p.sku || "";
-          return barcode === shopifyVariant.sku;
-        });
-        if (!matchingPrice) continue;
+    // if (product.status === "ACTIVE") {
+    //   console.log("🔄 更新活跃产品:", existing.id, product.name);
+    //   // 更新 variants
+    //   for (const shopifyVariant of shopifyProduct.variants) {
+    //     const matchingPrice = product.prices.find(p => {
+    //       const barcode = p.barcode || p.sku || "";
+    //       return barcode === shopifyVariant.sku;
+    //     });
+    //     if (!matchingPrice) continue;
 
-        const variantPayload = {
-          variant: {
-            price: matchingPrice.price.toFixed(2),
-            sku: matchingPrice.barcode || matchingPrice.sku || "",
-            barcode: matchingPrice.barcode || matchingPrice.sku || "",
-          },
-        };
-        await shopifyRequest(`products/${existing.id}/variants/${shopifyVariant.id}.json`, "PUT", variantPayload);
-      }
+    //     const variantPayload = {
+    //       variant: {
+    //         price: matchingPrice.price.toFixed(2),
+    //         sku: matchingPrice.barcode || matchingPrice.sku || "",
+    //         barcode: matchingPrice.barcode || matchingPrice.sku || "",
+    //       },
+    //     };
+    //     await shopifyRequest(`products/${existing.id}/variants/${shopifyVariant.id}.json`, "PUT", variantPayload);
+    //   }
       
-      // 同步库存和集合
-      await syncInventory(product, shopifyProduct);
-      if (product.category?.name) {
-        const collection = await getOrCreateCollection(product.category.name);
-        await addProductToCollection(shopifyProduct.id, collection.id);
-      }
+    //   // 同步库存和集合
+    //   await syncInventory(product, shopifyProduct);
+    //   if (product.category?.name) {
+    //     const collection = await getOrCreateCollection(product.category.name);
+    //     await addProductToCollection(shopifyProduct.id, collection.id);
+    //   }
       
-      return { updated: true, archived: false, product: shopifyProduct };
+    //   return { updated: true, archived: false, product: shopifyProduct };
       
-    } else {
-      console.log("📦 归档非活跃产品:", existing.id, product.name);
-      return { updated: true, archived: true, product: shopifyProduct };
-    }
+    // } else {
+    //   console.log("📦 归档非活跃产品:", existing.id, product.name);
+    //   return { updated: true, archived: true, product: shopifyProduct };
+    // }
     
   } else {
     // 新产品：只同步ACTIVE状态的产品
