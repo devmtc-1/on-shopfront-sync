@@ -123,7 +123,7 @@ function buildShopifyProductPayload(product) {
   const primaryPrice = product.prices?.[0]?.price || 0;
   const primaryBarcode = product.barcodes?.[0]?.code || "";
 
-  // Shopify会自动创建默认variant，我们不需要在创建时指定variants
+  // 创建产品时包含一个启用了库存管理的变体
   return {
     product: {
       title: product.name,
@@ -132,7 +132,17 @@ function buildShopifyProductPayload(product) {
       product_type: product.category?.name || "",
       tags: [sfIdTag],
       images,
-      // 不指定variants字段，Shopify会自动创建默认variant
+      variants: [
+        {
+          price: primaryPrice.toFixed(2),
+          sku: primaryBarcode,
+          barcode: primaryBarcode,
+          inventory_management: "shopify", // 启用库存管理
+          inventory_quantity: 0,
+          requires_shipping: true,
+          inventory_policy: "deny", // 新增：设置为拒绝超卖
+        }
+      ],
     },
   };
 }
@@ -141,7 +151,7 @@ function buildShopifyProductPayload(product) {
 async function syncInventory(product, shopifyProduct) {
   const locations = await getShopifyLocations();
   
-  // 使用Shopify自动创建的默认variant
+  // 使用Shopify的默认variant
   const shopifyVariant = shopifyProduct.variants?.[0];
   if (!shopifyVariant) {
     console.log("⚠️  未找到Shopify变体，跳过库存同步");
@@ -200,7 +210,7 @@ export async function importProductToShopify(product) {
     if (product.status === "ACTIVE") {
       console.log("🔄 更新活跃产品:", existing.id, product.name);
       
-      // 更新默认variant的价格和条码（使用第一条价格）
+      // 更新默认variant的价格、条码和库存管理
       const shopifyVariant = shopifyProduct.variants?.[0];
       if (shopifyVariant) {
         const primaryPrice = product.prices?.[0]?.price || 0;
@@ -212,6 +222,10 @@ export async function importProductToShopify(product) {
             price: primaryPrice.toFixed(2),
             sku: primaryBarcode,
             barcode: primaryBarcode,
+            inventory_management: "shopify", // 确保启用库存管理
+            inventory_quantity: 0,
+            requires_shipping: true,
+            inventory_policy: "deny", // 新增：设置为拒绝超卖
           },
         };
         
@@ -248,31 +262,12 @@ export async function importProductToShopify(product) {
       };
     }
     
-    // 创建新产品（不指定variants，Shopify会自动创建默认variant）
+    // 创建新产品（包含启用了库存管理的变体）
     const payload = buildShopifyProductPayload(product);
     const resp = await shopifyRequest("products.json", "POST", payload);
     const shopifyProduct = resp.product;
     
     console.log("🆕 创建新 Shopify 产品:", shopifyProduct.id, product.name);
-    
-    // 创建产品后，需要更新默认variant的价格和条码
-    const shopifyVariant = shopifyProduct.variants?.[0];
-    if (shopifyVariant) {
-      const primaryPrice = product.prices?.[0]?.price || 0;
-      const primaryBarcode = product.barcodes?.[0]?.code || "";
-      
-      const variantPayload = {
-        variant: {
-          id: shopifyVariant.id,
-          price: primaryPrice.toFixed(2),
-          sku: primaryBarcode,
-          barcode: primaryBarcode,
-        },
-      };
-      
-      await new Promise(resolve => setTimeout(resolve, 200));
-      await shopifyRequest(`products/${shopifyProduct.id}/variants/${shopifyVariant.id}.json`, "PUT", variantPayload);
-    }
     
     // 同步库存和集合
     await syncInventory(product, shopifyProduct);
