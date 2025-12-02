@@ -119,21 +119,11 @@ function buildShopifyProductPayload(product) {
   if (product.image) images.push({ src: product.image });
   if (product.alternateImages?.length) product.alternateImages.forEach(img => img && images.push({ src: img }));
 
-  // 安全的 prices 处理
-  const prices = Array.isArray(product.prices) ? product.prices : [];
-  const variants = prices.map(p => {
-    const barcode = product.barcodes?.[0]?.code || "";
-    const quantity = p.quantity;
-    return {
-      price: p.price.toFixed(2),
-      sku: barcode,
-      barcode,
-      option1: quantity === 1 ? "Single" : `${quantity} Pack`,
-      inventory_management: "shopify",
-      inventory_quantity: 0,
-    };
-  });
+  // 获取第一条价格作为产品价格
+  const primaryPrice = product.prices?.[0]?.price || 0;
+  const primaryBarcode = product.barcodes?.[0]?.code || "";
 
+  // Shopify会自动创建默认variant，我们不需要在创建时指定variants
   return {
     product: {
       title: product.name,
@@ -141,10 +131,8 @@ function buildShopifyProductPayload(product) {
       vendor: product.brand?.name || "Unknown",
       product_type: product.category?.name || "",
       tags: [sfIdTag],
-      // 移除 status 字段，因为只有ACTIVE产品会进入这个函数
       images,
-      options: [{ name: "Packaging", values: variants.map(v => v.option1) }],
-      variants,
+      // 不指定variants字段，Shopify会自动创建默认variant
     },
   };
 }
@@ -152,39 +140,40 @@ function buildShopifyProductPayload(product) {
 // ---------------- Sync Inventory ----------------
 async function syncInventory(product, shopifyProduct) {
   const locations = await getShopifyLocations();
+  
+  // 使用Shopify自动创建的默认variant
+  const shopifyVariant = shopifyProduct.variants?.[0];
+  if (!shopifyVariant) {
+    console.log("⚠️  未找到Shopify变体，跳过库存同步");
+    return;
+  }
 
-  for (let i = 0; i < product.prices.length; i++) {
-    const inventoryPerOutlet = product.inventory || [];
-    const shopifyVariant = shopifyProduct.variants[i];
-    if (!shopifyVariant) continue;
-
-    for (const outlet of inventoryPerOutlet) {
-      const location = locations.find(loc => loc.name.trim() === outlet.outlet.name.trim());
-      if (!location) continue;
+  const inventoryPerOutlet = product.inventory || [];
+  
+  for (const outlet of inventoryPerOutlet) {
+    const location = locations.find(loc => loc.name.trim() === outlet.outlet.name.trim());
+    if (!location) {
+      console.log(`⚠️  未找到对应Shopify location: ${outlet.outlet.name}`);
+      continue;
+    }
+    
+    try {
       await setVariantInventory(shopifyVariant.inventory_item_id, location.id, outlet.quantity);
+      console.log(`✅ 同步库存到 ${outlet.outlet.name}: ${outlet.quantity} 件`);
+    } catch (error) {
+      console.error(`❌ 库存同步失败 ${outlet.outlet.name}:`, error.message);
     }
   }
 }
 
-// ---------------- 解析选项名获取数量 ----------------
-function parseQuantityFromOption(optionName) {
-  if (!optionName) return 1;
-  if (optionName === 'Single') return 1;
-  const match = optionName.match(/(\d+)\s*Pack/);
-  return match ? parseInt(match[1]) : 1;
-}
-
 // ---------------- Import Product ----------------
 export async function importProductToShopify(product) {
-  console.log(`🔄 开始同步产品: ${product}`);
-
   console.log(`🔄 开始同步产品: ${product.name}`);
   
   const existing = await findShopifyProductBySFID(product.id);
   
   // 如果有已存在的产品，无论当前状态如何都要处理（更新或归档）
   if (existing) {
-    const payload = buildShopifyProductPayload(product);
     const updatePayload = {
       product: {
         id: existing.id,
@@ -193,10 +182,17 @@ export async function importProductToShopify(product) {
         vendor: product.brand?.name || "Unknown",
         product_type: product.category?.name || "",
         tags: [`SFID:${product.id}`],
-        status: product.status === "ACTIVE" ? "active" : "archived", // 更新状态
-        images: payload.product.images,
+        status: product.status === "ACTIVE" ? "active" : "archived",
       },
     };
+
+    // 如果有图片，添加图片更新
+    const images = [];
+    if (product.image) images.push({ src: product.image });
+    if (product.alternateImages?.length) product.alternateImages.forEach(img => img && images.push({ src: img }));
+    if (images.length > 0) {
+      updatePayload.product.images = images;
+    }
 
     const resp = await shopifyRequest(`products/${existing.id}.json`, "PUT", updatePayload);
     const shopifyProduct = resp.product;
@@ -204,23 +200,22 @@ export async function importProductToShopify(product) {
     if (product.status === "ACTIVE") {
       console.log("🔄 更新活跃产品:", existing.id, product.name);
       
-      // 更新 variants - 添加延迟
-      for (const shopifyVariant of shopifyProduct.variants) {
-        const matchingPrice = product.prices.find(p => {
-          const barcode = p.barcode || p.sku || "";
-          return barcode === shopifyVariant.sku;
-        });
-        if (!matchingPrice) continue;
-
+      // 更新默认variant的价格和条码（使用第一条价格）
+      const shopifyVariant = shopifyProduct.variants?.[0];
+      if (shopifyVariant) {
+        const primaryPrice = product.prices?.[0]?.price || 0;
+        const primaryBarcode = product.barcodes?.[0]?.code || "";
+        
         const variantPayload = {
           variant: {
-            price: matchingPrice.price.toFixed(2),
-            sku: matchingPrice.barcode || matchingPrice.sku || "",
-            barcode: matchingPrice.barcode || matchingPrice.sku || "",
+            id: shopifyVariant.id,
+            price: primaryPrice.toFixed(2),
+            sku: primaryBarcode,
+            barcode: primaryBarcode,
           },
         };
         
-        // 变体更新之间添加额外延迟
+        // 变体更新之间添加延迟
         await new Promise(resolve => setTimeout(resolve, 200));
         await shopifyRequest(`products/${existing.id}/variants/${shopifyVariant.id}.json`, "PUT", variantPayload);
       }
@@ -253,12 +248,31 @@ export async function importProductToShopify(product) {
       };
     }
     
-    // 创建新产品
+    // 创建新产品（不指定variants，Shopify会自动创建默认variant）
     const payload = buildShopifyProductPayload(product);
     const resp = await shopifyRequest("products.json", "POST", payload);
     const shopifyProduct = resp.product;
     
     console.log("🆕 创建新 Shopify 产品:", shopifyProduct.id, product.name);
+    
+    // 创建产品后，需要更新默认variant的价格和条码
+    const shopifyVariant = shopifyProduct.variants?.[0];
+    if (shopifyVariant) {
+      const primaryPrice = product.prices?.[0]?.price || 0;
+      const primaryBarcode = product.barcodes?.[0]?.code || "";
+      
+      const variantPayload = {
+        variant: {
+          id: shopifyVariant.id,
+          price: primaryPrice.toFixed(2),
+          sku: primaryBarcode,
+          barcode: primaryBarcode,
+        },
+      };
+      
+      await new Promise(resolve => setTimeout(resolve, 200));
+      await shopifyRequest(`products/${shopifyProduct.id}/variants/${shopifyVariant.id}.json`, "PUT", variantPayload);
+    }
     
     // 同步库存和集合
     await syncInventory(product, shopifyProduct);
