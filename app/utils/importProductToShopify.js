@@ -80,7 +80,99 @@ export async function findShopifyProductBySFID(sfId) {
   return null;
 }
 
-// ... 其他函数保持不变 ...
+// ---------------- Collection Helper ----------------
+async function getOrCreateCollection(categoryName) {
+  const encodedName = encodeURIComponent(categoryName);
+  const resp = await shopifyRequest(`custom_collections.json?title=${encodedName}`);
+  if (resp.custom_collections?.length > 0) return resp.custom_collections[0];
+
+  const createResp = await shopifyRequest("custom_collections.json", "POST", {
+    custom_collection: { title: categoryName },
+  });
+  return createResp.custom_collection;
+}
+
+async function addProductToCollection(productId, collectionId) {
+  return shopifyRequest("collects.json", "POST", {
+    collect: { product_id: productId, collection_id: collectionId },
+  });
+}
+
+// ---------------- Inventory Helper ----------------
+async function getShopifyLocations() {
+  const resp = await shopifyRequest("locations.json");
+  return resp.locations;
+}
+
+async function setVariantInventory(variantId, locationId, quantity) {
+  return shopifyRequest("inventory_levels/set.json", "POST", {
+    location_id: locationId,
+    inventory_item_id: variantId,
+    available: quantity,
+  });
+}
+
+// ---------------- Build Product Payload ----------------
+function buildShopifyProductPayload(product) {
+  const sfIdTag = `SFID:${product.id}`;
+  const images = [];
+  if (product.image) images.push({ src: product.image });
+  if (product.alternateImages?.length) product.alternateImages.forEach(img => img && images.push({ src: img }));
+
+  // 安全的 prices 处理
+  const prices = Array.isArray(product.prices) ? product.prices : [];
+  const variants = prices.map(p => {
+    const barcode = product.barcodes?.[0]?.code || "";
+    const quantity = p.quantity;
+    return {
+      price: p.price.toFixed(2),
+      sku: barcode,
+      barcode,
+      option1: quantity === 1 ? "Single" : `${quantity} Pack`,
+      inventory_management: "shopify",
+      inventory_quantity: 0,
+    };
+  });
+
+  return {
+    product: {
+      title: product.name,
+      body_html: product.description || "",
+      vendor: product.brand?.name || "Unknown",
+      product_type: product.category?.name || "",
+      tags: [sfIdTag],
+      // 移除 status 字段，因为只有ACTIVE产品会进入这个函数
+      images,
+      options: [{ name: "Packaging", values: variants.map(v => v.option1) }],
+      variants,
+    },
+  };
+}
+
+// ---------------- Sync Inventory ----------------
+async function syncInventory(product, shopifyProduct) {
+  const locations = await getShopifyLocations();
+
+  for (let i = 0; i < product.prices.length; i++) {
+    const inventoryPerOutlet = product.inventory || [];
+    const shopifyVariant = shopifyProduct.variants[i];
+    if (!shopifyVariant) continue;
+
+    for (const outlet of inventoryPerOutlet) {
+      const location = locations.find(loc => loc.name.trim() === outlet.outlet.name.trim());
+      if (!location) continue;
+      await setVariantInventory(shopifyVariant.inventory_item_id, location.id, outlet.quantity);
+    }
+  }
+}
+
+// ---------------- 解析选项名获取数量 ----------------
+function parseQuantityFromOption(optionName) {
+  if (!optionName) return 1;
+  if (optionName === 'Single') return 1;
+  const match = optionName.match(/(\d+)\s*Pack/);
+  return match ? parseInt(match[1]) : 1;
+}
 
 // ---------------- Import Product ----------------
 export async function importProductToShopify(product) {
@@ -99,7 +191,7 @@ export async function importProductToShopify(product) {
         vendor: product.brand?.name || "Unknown",
         product_type: product.category?.name || "",
         tags: [`SFID:${product.id}`],
-        status: product.status === "ACTIVE" ? "active" : "archived",
+        status: product.status === "ACTIVE" ? "active" : "archived", // 更新状态
         images: payload.product.images,
       },
     };
@@ -179,4 +271,5 @@ export async function importProductToShopify(product) {
   }
 }
 
-export { shopifyRequest, buildShopifyProductPayload };
+// 导出所有需要的函数
+export { shopifyRequest };
