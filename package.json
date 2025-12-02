@@ -14,8 +14,6 @@
     "graphql-codegen": "graphql-codegen",
     "vite": "vite",
     "typecheck": "react-router typegen && tsc --noEmit",
-    
-    // 新增的脚本
     "vercel-build": "prisma generate && prisma migrate deploy && react-router build",
     "vercel-dev": "prisma generate && node server.js",
     "db:generate": "prisma generate",
@@ -54,8 +52,6 @@
     "react-router": "^7.9.3",
     "react-router-dom": "^7.9.6",
     "vite-tsconfig-paths": "^5.1.4",
-    
-    // 建议添加的依赖
     "@shopify/shopify-api": "^11.3.0",
     "@shopify/shopify-app-express": "^7.0.0",
     "dotenv": "^16.4.7",
@@ -81,8 +77,6 @@
     "prettier": "^3.6.2",
     "typescript": "^5.9.3",
     "vite": "^6.3.6",
-    
-    // 建议添加的开发依赖
     "@types/express": "^4.17.21",
     "@types/cors": "^2.8.17",
     "vercel": "^38.2.1"
