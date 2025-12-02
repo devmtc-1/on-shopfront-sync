@@ -176,6 +176,8 @@ function parseQuantityFromOption(optionName) {
 
 // ---------------- Import Product ----------------
 export async function importProductToShopify(product) {
+  console.log(`🔄 开始同步产品: ${product}`);
+
   console.log(`🔄 开始同步产品: ${product.name}`);
   
   const existing = await findShopifyProductBySFID(product.id);
