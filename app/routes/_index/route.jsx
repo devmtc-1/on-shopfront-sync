@@ -71,6 +71,7 @@ export default function IndexRoute() {
         // Sync each product
         for (let i = 0; i < productsPage.length; i++) {
           const product = productsPage[i];
+          console.log("Syncing product:", product);
           console.log("Syncing product:", product.name, product.id);
 
           const importResp = await fetch("/import-products", {
