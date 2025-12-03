@@ -16,10 +16,8 @@ export async function loader({ request }) {
   
   // 硬编码多个分类ID
   const CATEGORY_IDS = [
-    "11e96ba509ddf5a487c00ab419c1109c", // Aperitif
-    "11e718d3cac71ecaa6100a1468096c0d", // Beer
-    "11e718d4766d6630bb9e0a1468096c0d", // Red Wine
-    // 添加更多分类ID...
+    "11eab4ebb0969a28ab7c02e7544f9a3c", // Aperitif
+    "11e718d3d2eca958a07b0a1468096c0d", // Beer
   ];
 
   const page = after ? `after=${after}` : "page=1";
