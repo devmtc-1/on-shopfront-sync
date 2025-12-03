@@ -65,12 +65,24 @@ async function executeSync(accessToken, vendor) {
     
     for (let page = 1; page < SYNC_CONFIG.START_PAGE; page++) {
       try {
+        console.log(`📍 正在定位第${page}页...`);
         const result = await fetchProductsPage(
           accessToken, 
           vendor, 
           SYNC_CONFIG.PRODUCTS_PER_PAGE, 
           currentCursor
         );
+        
+        console.log(`📍 fetchProductsPage 返回:`, JSON.stringify(result).substring(0, 200));
+        
+        // 检查返回结果
+        if (!result || result.error) {
+          throw new Error(result?.error || "获取产品页失败");
+        }
+        
+        if (!result.products || !Array.isArray(result.products)) {
+          throw new Error("产品数据格式错误");
+        }
         
         currentCursor = result.nextCursor;
         syncStatus.currentPage = page;
@@ -80,13 +92,14 @@ async function executeSync(accessToken, vendor) {
           break;
         }
         
-        console.log(`📍 已定位到第${page}页`);
+        console.log(`📍 已定位到第${page}页，获取到${result.products.length}个产品`);
         
         // 添加小延迟避免速率限制
         await new Promise(resolve => setTimeout(resolve, 500));
         
       } catch (error) {
         console.error(`❌ 定位第${page}页失败:`, error.message);
+        console.error("错误详情:", error);
         syncStatus.error = `定位第${page}页失败: ${error.message}`;
         syncStatus.isRunning = false;
         return;
@@ -108,6 +121,17 @@ async function executeSync(accessToken, vendor) {
           SYNC_CONFIG.PRODUCTS_PER_PAGE, 
           currentCursor
         );
+
+        console.log(`🔄 fetchProductsPage 返回:`, JSON.stringify(result).substring(0, 200));
+
+        // 检查返回结果
+        if (!result || result.error) {
+          throw new Error(result?.error || "获取产品页失败");
+        }
+
+        if (!result.products || !Array.isArray(result.products)) {
+          throw new Error("产品数据格式错误");
+        }
 
         if (result.products.length > 0) {
           // 导入产品到数据库
@@ -146,6 +170,7 @@ async function executeSync(accessToken, vendor) {
 
       } catch (error) {
         console.error(`❌ 第${page}页同步失败:`, error.message);
+        console.error("错误详情:", error);
         
         syncStatus.details.push({
           page,
@@ -173,6 +198,7 @@ async function executeSync(accessToken, vendor) {
 
   } catch (error) {
     console.error("同步过程出错:", error);
+    console.error("完整错误堆栈:", error.stack);
     syncStatus.error = error.message;
     syncStatus.isRunning = false;
   }
@@ -214,6 +240,8 @@ async function fetchProductsPage(accessToken, vendor, first, after = null) {
 
   while (retryCount < SYNC_CONFIG.MAX_RETRIES) {
     try {
+      console.log(`📡 发送请求: first=${first}, after=${after ? '...' + after.slice(-20) : 'null'}`);
+      
       const response = await fetch(`https://${vendor}.onshopfront.com/api/v2/graphql`, {
         method: "POST",
         headers: {
@@ -226,19 +254,33 @@ async function fetchProductsPage(accessToken, vendor, first, after = null) {
         timeout: 30000
       });
 
+      console.log(`📥 收到响应状态: ${response.status} ${response.statusText}`);
+      
       const text = await response.text();
+      console.log(`📥 响应文本长度: ${text.length} 字符`);
+      
+      if (text.length < 100) {
+        console.log(`📥 响应内容: ${text}`);
+      } else {
+        console.log(`📥 响应前200字符: ${text.substring(0, 200)}...`);
+      }
+      
       let data;
-
       try {
         data = JSON.parse(text);
       } catch (err) {
-        throw new Error("GraphQL返回非JSON数据");
+        console.error("❌ JSON解析失败:", err.message);
+        console.error("❌ 原始文本:", text);
+        throw new Error(`GraphQL返回非JSON数据: ${text.substring(0, 100)}...`);
       }
 
       // 检查API错误
       if (data.errors) {
+        const errorMessage = data.errors[0]?.message || "GraphQL错误";
+        console.error(`❌ GraphQL错误:`, JSON.stringify(data.errors));
+        
         // 处理Throttled错误
-        if (data.errors.some(err => err.message === "Throttled")) {
+        if (errorMessage === "Throttled") {
           retryCount++;
           const delay = Math.pow(2, retryCount) * 1000 + Math.random() * 1000;
           console.log(`⏰ 被节流，等待${delay/1000}秒后重试 (${retryCount}/${SYNC_CONFIG.MAX_RETRIES})...`);
@@ -246,39 +288,80 @@ async function fetchProductsPage(accessToken, vendor, first, after = null) {
           continue;
         }
         
-        throw new Error(data.errors[0]?.message || "GraphQL错误");
+        // 返回错误对象而不是抛出异常
+        return {
+          error: errorMessage,
+          rawError: data.errors
+        };
       }
 
-      if (!data.data?.products) {
-        throw new Error("Shopfront API未返回products字段");
+      // 检查数据结构
+      if (!data.data) {
+        console.error("❌ API返回无data字段:", JSON.stringify(data));
+        return {
+          error: "API返回无data字段",
+          rawData: data
+        };
       }
 
-      const edges = data.data.products.edges || [];
+      if (!data.data.products) {
+        console.error("❌ API返回无products字段:", JSON.stringify(data.data));
+        return {
+          error: "API返回无products字段",
+          rawData: data.data
+        };
+      }
+
+      // 安全地获取edges
+      const edges = Array.isArray(data.data.products.edges) 
+        ? data.data.products.edges 
+        : [];
+      
+      const pageInfo = data.data.products.pageInfo || {};
+      
+      console.log(`✅ 获取成功: ${edges.length}个产品`);
+      if (edges.length > 0) {
+        console.log(`✅ 第一个产品: ${edges[0]?.node?.id || '未知'} - ${edges[0]?.node?.name || '未知'}`);
+      }
       
       return {
-        products: edges.map(edge => edge.node),
-        nextCursor: data.data.products.pageInfo?.endCursor || null,
-        hasNextPage: data.data.products.pageInfo?.hasNextPage || false
+        products: edges.map(edge => edge.node).filter(node => node), // 过滤掉null节点
+        nextCursor: pageInfo.endCursor || null,
+        hasNextPage: pageInfo.hasNextPage || false,
+        rawData: data // 用于调试
       };
 
     } catch (error) {
       retryCount++;
+      console.error(`⚠️ 请求失败 (${retryCount}/${SYNC_CONFIG.MAX_RETRIES}):`, error.message);
+      console.error("错误堆栈:", error.stack);
       
       if (retryCount >= SYNC_CONFIG.MAX_RETRIES) {
-        throw new Error(`获取产品失败: ${error.message} (已重试${SYNC_CONFIG.MAX_RETRIES}次)`);
+        // 返回错误对象而不是抛出异常
+        return {
+          error: `获取产品失败: ${error.message} (已重试${SYNC_CONFIG.MAX_RETRIES}次)`
+        };
       }
       
       const delay = Math.pow(2, retryCount) * 1000;
-      console.log(`⚠️ 请求失败，等待${delay/1000}秒后重试 (${retryCount}/${SYNC_CONFIG.MAX_RETRIES})...`);
+      console.log(`⏳ 等待${delay/1000}秒后重试...`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
 
-  throw new Error("获取产品数据失败");
+  // 如果循环结束但未返回，返回错误
+  return {
+    error: "获取产品数据失败，超出最大重试次数"
+  };
 }
 
 // 导入产品到数据库
 async function importProducts(products) {
+  if (!Array.isArray(products)) {
+    console.error("❌ importProducts: products 不是数组:", products);
+    return 0;
+  }
+  
   console.log(`📥 导入${products.length}个产品到数据库...`);
   
   // TODO: 实现你的数据库导入逻辑
@@ -289,6 +372,11 @@ async function importProducts(products) {
   
   for (const product of products) {
     try {
+      if (!product || !product.id) {
+        console.warn("⚠️ 跳过无效产品数据:", product);
+        continue;
+      }
+      
       // 示例：保存到数据库
       // await db.product.upsert({
       //   where: { shopfrontId: product.id },
@@ -302,7 +390,7 @@ async function importProducts(products) {
       successCount++;
       
     } catch (error) {
-      console.error(`导入产品失败 ${product.id}:`, error.message);
+      console.error(`导入产品失败 ${product.id || '未知ID'}:`, error.message);
       errors.push({
         productId: product.id,
         productName: product.name,
@@ -313,7 +401,6 @@ async function importProducts(products) {
   
   if (errors.length > 0) {
     console.warn(`⚠️ ${errors.length}个产品导入失败`);
-    // 可以在这里记录错误日志
   }
   
   console.log(`✅ 导入完成: ${successCount}个成功, ${errors.length}个失败`);
