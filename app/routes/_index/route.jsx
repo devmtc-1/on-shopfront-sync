@@ -34,91 +34,166 @@ export default function IndexRoute() {
   };
 
   // Paginate and sync products per page with real-time progress
-  const syncProductsToShopify = async () => {
-    setSyncing(true);
-    setSyncResult(null);
-    setProgress(0);
-    setErrors([]);
-    setProducts([]); // Clear previous product list
+  // const syncProductsToShopify = async () => {
+  //   setSyncing(true);
+  //   setSyncResult(null);
+  //   setProgress(0);
+  //   setErrors([]);
+  //   setProducts([]); // Clear previous product list
 
-    try {
-      let cursor = null;
-      let hasNextPage = true;
-      const pageSize = 50;
-      const results = [];
-      let totalProducts = 0;
+  //   try {
+  //     let cursor = null;
+  //     let hasNextPage = true;
+  //     const pageSize = 50;
+  //     const results = [];
+  //     let totalProducts = 0;
 
-      while (hasNextPage) {
-        const params = new URLSearchParams({ first: pageSize });
-        if (cursor) params.set("after", cursor);
+  //     while (hasNextPage) {
+  //       const params = new URLSearchParams({ first: pageSize });
+  //       if (cursor) params.set("after", cursor);
 
-        const resp = await fetch(`/shopfront-products?${params.toString()}`);
-        const data = await resp.json();
+  //       const resp = await fetch(`/shopfront-products?${params.toString()}`);
+  //       const data = await resp.json();
 
-        if (data.errors?.length) setErrors(prev => [...prev, ...data.errors]);
+  //       if (data.errors?.length) setErrors(prev => [...prev, ...data.errors]);
 
-        const productsPage = data.products.map(e => e.node);
+  //       const productsPage = data.products.map(e => e.node);
 
-        // Set total product count on first pagination
-        if (!totalProducts) {
-          totalProducts = data.totalCount || productsPage.length;
-          setTotalCount(totalProducts);
-        }
+  //       // Set total product count on first pagination
+  //       if (!totalProducts) {
+  //         totalProducts = data.totalCount || productsPage.length;
+  //         setTotalCount(totalProducts);
+  //       }
 
-        // Add products from this page to the list
-        setProducts(prev => [...prev, ...productsPage]);
+  //       // Add products from this page to the list
+  //       setProducts(prev => [...prev, ...productsPage]);
 
-        // Sync each product
-        for (let i = 0; i < productsPage.length; i++) {
-          const product = productsPage[i];
-          console.log("Syncing product:", product);
-          console.log("Syncing product:", product.name, product.id);
+  //       // Sync each product
+  //       for (let i = 0; i < productsPage.length; i++) {
+  //         const product = productsPage[i];
+  //         console.log("Syncing product:", product);
+  //         console.log("Syncing product:", product.name, product.id);
 
-          const importResp = await fetch("/import-products", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ product }),
-          });
+  //         const importResp = await fetch("/import-products", {
+  //           method: "POST",
+  //           headers: { "Content-Type": "application/json" },
+  //           body: JSON.stringify({ product }),
+  //         });
 
-          let importData;
-          const text = await importResp.text();
-          try { 
-            importData = JSON.parse(text); 
-          } catch (err) {
-            results.push({ productId: product.id, success: false, error: "JSON parsing failed" });
-            continue;
-          }
+  //         let importData;
+  //         const text = await importResp.text();
+  //         try { 
+  //           importData = JSON.parse(text); 
+  //         } catch (err) {
+  //           results.push({ productId: product.id, success: false, error: "JSON parsing failed" });
+  //           continue;
+  //         }
 
-          if (importData.success) {
-            results.push({ productId: product.id, success: true });
-          } else {
-            results.push({ 
-              productId: product.id, 
-              success: false, 
-              error: importData.error || "Unknown error" 
-            });
-          }
+  //         if (importData.success) {
+  //           results.push({ productId: product.id, success: true });
+  //         } else {
+  //           results.push({ 
+  //             productId: product.id, 
+  //             success: false, 
+  //             error: importData.error || "Unknown error" 
+  //           });
+  //         }
 
-          // Update progress after each product sync
-          const syncedCount = results.length;
-          const progressValue = totalProducts 
-            ? Math.round((syncedCount / totalProducts) * 100) 
-            : 0;
-          setProgress(progressValue);
-        }
+  //         // Update progress after each product sync
+  //         const syncedCount = results.length;
+  //         const progressValue = totalProducts 
+  //           ? Math.round((syncedCount / totalProducts) * 100) 
+  //           : 0;
+  //         setProgress(progressValue);
+  //       }
 
-        // Next page
-        hasNextPage = data.pageInfo?.hasNextPage || false;
-        cursor = data.pageInfo?.endCursor || null;
-      }
+  //       // Next page
+  //       hasNextPage = data.pageInfo?.hasNextPage || false;
+  //       cursor = data.pageInfo?.endCursor || null;
+  //     }
 
-      setSyncResult(results);
-    } catch (err) {
-      alert("Sync failed: " + err.message);
-    } finally {
-      setSyncing(false);
+  //     setSyncResult(results);
+  //   } catch (err) {
+  //     alert("Sync failed: " + err.message);
+  //   } finally {
+  //     setSyncing(false);
+  //   }
+  // };
+  
+const syncProductsToShopify = async () => {
+  setSyncing(true);
+  setSyncResult(null);
+  setProgress(0);
+  setErrors([]);
+  setProducts([]);
+
+  try {
+    // 1. 启动后台任务
+    const startResp = await fetch("/start-sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ 
+        pageSize: 50,
+        categoryId: "11e96ba509ddf5a487c00ab419c1109c" // 可选：如果要按分类同步
+      }),
+    });
+
+    const startData = await startResp.json();
+    if (!startData.success) {
+      throw new Error(startData.error || "启动任务失败");
     }
-  };
+
+    const taskId = startData.taskId;
+    console.log("后台同步任务已启动，ID:", taskId);
+
+    // 2. 开始轮询任务状态
+    const pollInterval = setInterval(async () => {
+      try {
+        const checkResp = await fetch(`/check-sync?taskId=${taskId}`);
+        const checkData = await checkResp.json();
+
+        if (!checkData.success) {
+          clearInterval(pollInterval);
+          setSyncing(false);
+          alert("查询任务状态失败: " + checkData.error);
+          return;
+        }
+
+        // 更新前端状态
+        setProgress(checkData.progress);
+        setTotalCount(checkData.totalProducts);
+        // 可以只更新部分产品用于展示
+        if (checkData.products && checkData.products.length > 0) {
+          setProducts(checkData.products);
+        }
+
+        // 任务完成或失败，停止轮询
+        if (checkData.status === 'completed' || checkData.status === 'failed') {
+          clearInterval(pollInterval);
+          setSyncing(false);
+          setSyncResult(checkData.results);
+          setProducts(checkData.products || []); // 设置最终产品列表
+          
+          if (checkData.status === 'failed') {
+            alert("同步失败: " + checkData.error);
+          } else {
+            console.log("同步完成！", checkData);
+          }
+        }
+      } catch (pollError) {
+        console.error("轮询失败:", pollError);
+      }
+    }, 2000); // 每2秒轮询一次
+
+    // 组件卸载或出错时清理定时器
+    return () => clearInterval(pollInterval);
+
+  } catch (err) {
+    console.error("同步过程出错:", err);
+    alert("启动同步过程失败: " + err.message);
+    setSyncing(false);
+  }
+};
 
   return (
     <Page title="Product Sync">
