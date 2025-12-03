@@ -14,11 +14,11 @@ export async function loader() {
   // 硬编码分类ID
   // const CATEGORY_ID = "11e96ba509ddf5a487c00ab419c1109c";
 
-const categoryIds = [
+const TARGET_CATEGORIES = [
   "11eab4ebb0969a28ab7c02e7544f9a3c",
-  "11e718d3d2eca958a07b0a1468096c0d",
+  "11e718d3d2eca958a07b0a1468096c0d"
 ];
-const categoriesParam = `categories: [${categoryIds.map(id => `"${id}"`).join(', ')}]`;
+
   
   let cursor = null;
   let hasNextPage = true;
@@ -32,6 +32,7 @@ const categoriesParam = `categories: [${categoryIds.map(id => `"${id}"`).join(',
 
   // 先获取该分类的活跃产品数
   try {
+    const categoriesParam = `categories: [${TARGET_CATEGORIES.map(id => `"${id}"`).join(', ')}]`;
     const countQuery = `
       {
         products(first: 1, ${categoriesParam}, statuses: [ACTIVE]) {
@@ -62,16 +63,11 @@ const categoriesParam = `categories: [${categoryIds.map(id => `"${id}"`).join(',
 
   while (hasNextPage) {
     page++;
-
+    const categoriesParam = `categories: [${TARGET_CATEGORIES.map(id => `"${id}"`).join(', ')}]`;
     // 获取指定分类的ACTIVE状态产品，每页50个
     const query = `
       {
-        products(
-          first: 50 
-          ${cursor ? `, after: "${cursor}"` : ""}
-          ${categoriesParam}
-          statuses: [ACTIVE]
-        ) {
+        products(first: 50 ${cursor ? `, after: "${cursor}"` : ""}, ${categoriesParam}, statuses: [ACTIVE]) {
           edges {
             cursor
             node { 
