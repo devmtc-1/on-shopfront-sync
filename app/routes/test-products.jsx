@@ -1,148 +1,183 @@
-// app/routes/test-categories.jsx
+// app/routes/test-products.jsx
 import { json } from "@remix-run/node";
 import fetch from "node-fetch";
 import { getTokens } from "../utils/shopfrontTokens.server";
 
 export async function loader() {
   const vendor = "plonk";
-  const tokens = getTokens(vendor);
-  
+  let tokens = getTokens(vendor);
+
   if (!tokens?.access_token) {
-    return json({ error: "请先完成授权" }, { status: 401 });
+    return json({ error: "请先授权再测试" }, { status: 401 });
   }
 
-  console.log("🔍 开始获取所有分类...");
+  let cursor = null;
+  let hasNextPage = true;
+  let page = 0;
+  let totalProducts = 0;
 
+  const results = [];
+
+  console.log("🚀 开始测试 Shopfront 分页（只获取ACTIVE产品，每页50个）");
+
+  // 先获取总活跃产品数
   try {
-    // 一次性获取所有分类（使用大的first值）
+    const countQuery = `
+      {
+        products(first: 1, statuses: [ACTIVE]) {
+          totalCount
+        }
+      }
+    `;
+
+    const countResp = await fetch(`https://${vendor}.onshopfront.com/api/v2/graphql`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${tokens.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query: countQuery }),
+    });
+
+    const countText = await countResp.text();
+    const countData = JSON.parse(countText);
+    const totalActiveCount = countData.data?.products?.totalCount ?? 0;
+    
+    console.log(`📊 活跃产品总数: ${totalActiveCount}`);
+    console.log(`📊 预计页数: ${Math.ceil(totalActiveCount / 50)} (每页50个)`);
+    
+  } catch (error) {
+    console.log("⚠️ 无法获取总产品数，继续分页测试");
+  }
+
+  while (hasNextPage) {
+    page++;
+
+    // 只获取ACTIVE状态的产品，每页50个
     const query = `
       {
-        categories(first: 500) {
+        products(first: 50 ${cursor ? `, after: "${cursor}"` : ""}, statuses: [ACTIVE]) {
           edges {
-            node {
-              id
+            cursor
+            node { 
+              id 
               name
-              description
-              parent { id name }
-              children { id name }
-              productsCount
+              status
               createdAt
-              updatedAt
             }
           }
-          pageInfo {
-            hasNextPage
-            endCursor
+          pageInfo { 
+            hasNextPage 
+            endCursor 
           }
           totalCount
         }
       }
     `;
 
-    const response = await fetch(`https://${vendor}.onshopfront.com/api/v2/graphql`, {
+    const resp = await fetch(`https://${vendor}.onshopfront.com/api/v2/graphql`, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${tokens.access_token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ query })
+      body: JSON.stringify({ query }),
     });
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    const text = await resp.text();
+    let data;
+
+    try {
+      data = JSON.parse(text);
+    } catch (err) {
+      console.error("❌ GraphQL 返回非 JSON：", text.substring(0, 200));
+      return json({ error: "GraphQL 返回非 JSON", raw: text.substring(0, 200) }, { status: 500 });
     }
 
-    const data = await response.json();
-    
+    // 检查GraphQL错误
     if (data.errors) {
-      console.error("GraphQL错误:", data.errors);
-      return json({ 
-        error: "GraphQL错误", 
-        details: data.errors 
-      }, { status: 500 });
+      console.error("❌ GraphQL 错误：", data.errors);
+      return json({ error: "GraphQL 错误", details: data.errors }, { status: 500 });
     }
 
-    const edges = data.data?.categories?.edges || [];
-    const categories = edges.map(edge => edge.node);
-    const totalCount = data.data?.categories?.totalCount || 0;
-    const hasNextPage = data.data?.categories?.pageInfo?.hasNextPage || false;
+    const edges = data.data?.products?.edges || [];
+    const pageInfo = data.data?.products?.pageInfo;
+    const pageTotalCount = data.data?.products?.totalCount ?? 0;
 
-    console.log(`✅ 获取到 ${categories.length} 个分类，总计 ${totalCount}`);
-    
-    // 显示分类信息
-    categories.forEach(category => {
-      console.log(`📦 ${category.name} (ID: ${category.id}) - ${category.productsCount || 0} 个产品`);
-    });
+    hasNextPage = pageInfo?.hasNextPage ?? false;
+    cursor = pageInfo?.endCursor ?? null;
 
-    return json({
-      ok: true,
-      totalCount,
-      hasNextPage,
-      categories,
-      message: `成功获取 ${categories.length} 个分类`
-    });
+    totalProducts += edges.length;
 
-  } catch (error) {
-    console.error("获取分类失败:", error);
-    return json({ 
-      error: "获取分类失败: " + error.message 
-    }, { status: 500 });
-  }
-}
-
-// 简单的React组件显示分类
-export default function TestCategories() {
-  const data = useLoaderData();
-  
-  if (data.error) {
-    return (
-      <div style={{ padding: '20px', fontFamily: 'monospace' }}>
-        <h1>❌ 错误</h1>
-        <p>{data.error}</p>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ padding: '20px', fontFamily: 'monospace' }}>
-      <h1>📋 分类列表</h1>
-      <p>总计: {data.totalCount} 个分类</p>
+    // 显示更多详情
+    if (edges.length > 0) {
+      const firstProduct = edges[0].node;
+      const lastProduct = edges[edges.length - 1].node;
       
-      <div style={{ marginTop: '20px' }}>
-        {data.categories.map(category => (
-          <div key={category.id} style={{ 
-            marginBottom: '15px', 
-            padding: '10px', 
-            border: '1px solid #ddd',
-            borderRadius: '5px'
-          }}>
-            <div style={{ fontWeight: 'bold', fontSize: '16px' }}>
-              {category.name}
-            </div>
-            <div style={{ color: '#666', fontSize: '14px' }}>
-              ID: <code>{category.id}</code>
-            </div>
-            <div style={{ color: '#666', fontSize: '14px' }}>
-              产品数量: {category.productsCount || 0}
-            </div>
-            {category.description && (
-              <div style={{ color: '#888', fontSize: '12px', marginTop: '5px' }}>
-                描述: {category.description}
-              </div>
-            )}
-            {category.parent && (
-              <div style={{ color: '#888', fontSize: '12px' }}>
-                父分类: {category.parent.name} (ID: {category.parent.id})
-              </div>
-            )}
-            {category.children && category.children.length > 0 && (
-              <div style={{ color: '#888', fontSize: '12px' }}>
-                子分类: {category.children.length} 个
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+      console.log(
+        `第 ${page} 页：${edges.length} 个产品 | ` +
+        `累计: ${totalProducts} | ` +
+        `hasNextPage: ${hasNextPage}`
+      );
+      
+      // 每5页显示一次产品示例
+      if (page % 5 === 0 || page === 1) {
+        console.log(`  第一个产品: ${firstProduct.name.substring(0, 30)}... (${firstProduct.status})`);
+        console.log(`  创建时间: ${new Date(firstProduct.createdAt).toLocaleDateString()}`);
+      }
+    } else {
+      console.log(`第 ${page} 页：0 个产品，hasNextPage = ${hasNextPage}`);
+    }
+
+    results.push({
+      page,
+      count: edges.length,
+      hasNextPage,
+      endCursor: cursor ? cursor.substring(0, 20) + '...' : null,
+      firstProductId: edges.length > 0 ? edges[0].node.id : null,
+      lastProductId: edges.length > 0 ? edges[edges.length - 1].node.id : null
+    });
+
+    // 添加延迟避免速率限制（每3页延迟一次）
+    if (hasNextPage && page % 3 === 0) {
+      console.log("⏳ 添加1秒延迟避免速率限制...");
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    // 安全避免死循环（如果活跃产品太多）
+    if (page > 200) { // 200页 * 50个 = 最多10000个产品
+      console.log("⚠️ 安全限制：超过200页，停止测试");
+      break;
+    }
+    
+    // 如果已经很久没有获取到产品，停止
+    if (page > 10 && totalProducts === 0) {
+      console.log("⚠️ 已获取10页但无产品，停止测试");
+      break;
+    }
+  }
+
+  console.log("🎉 分页测试结束");
+  console.log(`📊 总计获取: ${totalProducts} 个活跃产品`);
+  console.log(`📊 测试页数: ${results.length}`);
+
+  // 分析结果
+  const pagesWithProducts = results.filter(r => r.count > 0).length;
+  const pagesWithoutProducts = results.filter(r => r.count === 0).length;
+  
+  console.log(`📊 有产品的页数: ${pagesWithProducts}`);
+  console.log(`📊 无产品的页数: ${pagesWithoutProducts}`);
+
+  return json({
+    ok: true,
+    message: "分页测试完成（只获取ACTIVE产品）",
+    summary: {
+      totalPages: results.length,
+      totalProducts,
+      pagesWithProducts,
+      pagesWithoutProducts
+    },
+    pagesTested: results.length,
+    details: results,
+  });
 }
