@@ -12,7 +12,7 @@ export async function loader() {
   }
 
   // 硬编码分类ID
-  const CATEGORY_ID = "11e96ba509ddf5a487c00ab419c1109c";
+  const CATEGORY_ID = "11e718d3cac71ecaa6100a1468096c0d";
   
   let cursor = null;
   let hasNextPage = true;
