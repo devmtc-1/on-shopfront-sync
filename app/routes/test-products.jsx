@@ -155,8 +155,8 @@ export async function loader() {
     }
 
     // 安全避免死循环
-    if (page > 50) { // 最多50页
-      console.log("⚠️ 安全限制：超过50页，停止测试");
+    if (page > 75) { // 最多75页
+      console.log("⚠️ 安全限制：超过75页，停止测试");
       break;
     }
     
