@@ -8,7 +8,7 @@ export async function action({ request }) {
   
   if (action === "register") {
     try {
-      const webhookUrl = "https://servers-citizens-mines-region.trycloudflare.com/webhooks/shopfront";
+      const webhookUrl = "https://on-shopfront-sync.vercel.app/webhooks/shopfront";
       await registerShopfrontWebhooks(webhookUrl);
       return json({ success: true, message: "Webhook注册成功！" });
     } catch (error) {
