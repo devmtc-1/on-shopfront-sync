@@ -14,11 +14,25 @@ export async function loader({ request }) {
   const first = parseInt(url.searchParams.get("first") || "50", 10);
   const after = url.searchParams.get("after") || null;
   
-  // 硬编码多个分类ID
-  const CATEGORY_IDS = [
-    "11eab4ebb0969a28ab7c02e7544f9a3c", // Aperitif
-    "11e718d3d2eca958a07b0a1468096c0d", // Beer
-  ];
+  // 从查询参数获取分类ID
+  const categoriesParam = url.searchParams.get("categories");
+  let CATEGORY_IDS = [];
+  
+  if (categoriesParam) {
+    // 分割逗号分隔的分类ID，清除空格
+    CATEGORY_IDS = categoriesParam
+      .split(',')
+      .map(id => id.trim())
+      .filter(id => id.length > 0);
+  }
+  
+  // 如果没有传入分类ID，返回错误
+  if (CATEGORY_IDS.length === 0) {
+    return json({ 
+      error: "请提供至少一个分类ID",
+      message: "使用 categories 查询参数传递分类ID，多个ID用逗号分隔"
+    }, { status: 400 });
+  }
 
   const page = after ? `after=${after}` : "page=1";
 
