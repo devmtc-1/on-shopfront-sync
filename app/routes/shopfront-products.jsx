@@ -13,25 +13,24 @@ export async function loader({ request }) {
   const url = new URL(request.url);
   const first = parseInt(url.searchParams.get("first") || "50", 10);
   const after = url.searchParams.get("after") || null;
-  
-  // 从查询参数获取分类ID
   const categoriesParam = url.searchParams.get("categories");
-  let CATEGORY_IDS = [];
   
+  // 如果传入了分类ID参数，使用传入的分类ID
+  let CATEGORY_IDS = [];
   if (categoriesParam) {
-    // 分割逗号分隔的分类ID，清除空格
     CATEGORY_IDS = categoriesParam
       .split(',')
       .map(id => id.trim())
       .filter(id => id.length > 0);
   }
   
-  // 如果没有传入分类ID，返回错误
+  // 如果没有传入分类ID，使用硬编码的默认值
   if (CATEGORY_IDS.length === 0) {
-    return json({ 
-      error: "请提供至少一个分类ID",
-      message: "使用 categories 查询参数传递分类ID，多个ID用逗号分隔"
-    }, { status: 400 });
+    CATEGORY_IDS = [
+      "11e96ba509ddf5a487c00ab419c1109c", // Aperitif
+      "11e718d3cac71ecaa6100a1468096c0d", // Beer
+      "11e718d4766d6630bb9e0a1468096c0d", // Red Wine
+    ];
   }
 
   const page = after ? `after=${after}` : "page=1";
