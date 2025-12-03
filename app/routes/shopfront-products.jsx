@@ -13,7 +13,7 @@ export async function loader({ request }) {
   const url = new URL(request.url);
   const first = parseInt(url.searchParams.get("first") || "50", 10);
   const after = url.searchParams.get("after") || null;
-  const CATEGORY_ID = "11e96ba509ddf5a487c00ab419c1109c";
+  const CATEGORY_ID = "11ec742046c7a4e8a96502a75e193b14";
   const page = after ? `after=${after}` : "page=1";
 
   const fetchProducts = async (accessToken) => {
