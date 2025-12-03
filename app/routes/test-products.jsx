@@ -3,6 +3,46 @@ import { json } from "@remix-run/node";
 import fetch from "node-fetch";
 import { getTokens } from "../utils/shopfrontTokens.server";
 
+// 延迟函数
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// 带重试的fetch函数
+async function fetchWithRetry(url, options, maxRetries = 3) {
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      const text = await response.text();
+      const data = JSON.parse(text);
+      
+      // 检查Throttled错误
+      if (data.errors && data.errors.some(err => err.message === "Throttled")) {
+        if (attempt < maxRetries) {
+          const waitTime = attempt * 2000 + Math.random() * 1000; // 指数退避
+          console.log(`⏰ 被节流，等待${waitTime/1000}秒后重试 (${attempt}/${maxRetries})...`);
+          await delay(waitTime);
+          continue;
+        } else {
+          throw new Error("Throttled: 已达到最大重试次数");
+        }
+      }
+      
+      return { response, data, text };
+      
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxRetries) {
+        const waitTime = attempt * 1000;
+        console.log(`⚠️ 请求失败，等待${waitTime/1000}秒后重试 (${attempt}/${maxRetries})...`);
+        await delay(waitTime);
+      }
+    }
+  }
+  
+  throw lastError;
+}
+
 export async function loader() {
   const vendor = "plonk";
   let tokens = getTokens(vendor);
@@ -15,13 +55,16 @@ export async function loader() {
   let hasNextPage = true;
   let page = 0;
   let totalProducts = 0;
+  let throttledCount = 0;
 
   const results = [];
 
-  console.log("🚀 开始测试 Shopfront 分页（只获取ACTIVE产品，每页50个）");
+  console.log("🚀 开始测试 Shopfront 分页（只获取ACTIVE产品，带速率限制处理）");
 
-  // 先获取总活跃产品数
   try {
+    // 先获取总活跃产品数（单独请求，避免影响分页）
+    console.log("📊 获取活跃产品总数...");
+    
     const countQuery = `
       {
         products(first: 1, statuses: [ACTIVE]) {
@@ -30,131 +73,161 @@ export async function loader() {
       }
     `;
 
-    const countResp = await fetch(`https://${vendor}.onshopfront.com/api/v2/graphql`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${tokens.access_token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ query: countQuery }),
-    });
+    const countResult = await fetchWithRetry(
+      `https://${vendor}.onshopfront.com/api/v2/graphql`,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${tokens.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ query: countQuery }),
+      }
+    );
 
-    const countText = await countResp.text();
-    const countData = JSON.parse(countText);
-    const totalActiveCount = countData.data?.products?.totalCount ?? 0;
+    const totalActiveCount = countResult.data.data?.products?.totalCount ?? 0;
     
-    console.log(`📊 活跃产品总数: ${totalActiveCount}`);
+    console.log(`✅ 活跃产品总数: ${totalActiveCount}`);
     console.log(`📊 预计页数: ${Math.ceil(totalActiveCount / 50)} (每页50个)`);
     
-  } catch (error) {
-    console.log("⚠️ 无法获取总产品数，继续分页测试");
-  }
+    // 等待2秒再开始分页，给API喘息时间
+    console.log("⏳ 等待2秒后开始分页...");
+    await delay(2000);
 
-  while (hasNextPage) {
-    page++;
+    while (hasNextPage) {
+      page++;
 
-    // 只获取ACTIVE状态的产品，每页50个
-    const query = `
-      {
-        products(first: 50 ${cursor ? `, after: "${cursor}"` : ""}, statuses: [ACTIVE]) {
-          edges {
-            cursor
-            node { 
-              id 
-              name
-              status
-              createdAt
+      // 只获取ACTIVE状态的产品，每页50个
+      const query = `
+        {
+          products(first: 50 ${cursor ? `, after: "${cursor}"` : ""}, statuses: [ACTIVE]) {
+            edges {
+              cursor
+              node { 
+                id 
+                name
+                status
+                createdAt
+              }
             }
+            pageInfo { 
+              hasNextPage 
+              endCursor 
+            }
+            totalCount
           }
-          pageInfo { 
-            hasNextPage 
-            endCursor 
-          }
-          totalCount
         }
+      `;
+
+      console.log(`📄 请求第 ${page} 页...`);
+
+      try {
+        const result = await fetchWithRetry(
+          `https://${vendor}.onshopfront.com/api/v2/graphql`,
+          {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${tokens.access_token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ query }),
+          }
+        );
+
+        const data = result.data;
+        const edges = data.data?.products?.edges || [];
+        const pageInfo = data.data?.products?.pageInfo;
+        const pageTotalCount = data.data?.products?.totalCount ?? 0;
+
+        hasNextPage = pageInfo?.hasNextPage ?? false;
+        cursor = pageInfo?.endCursor ?? null;
+
+        totalProducts += edges.length;
+
+        // 显示详情
+        if (edges.length > 0) {
+          const firstProduct = edges[0].node;
+          
+          console.log(
+            `✅ 第 ${page} 页：获取 ${edges.length} 个产品 | ` +
+            `累计: ${totalProducts}/${totalActiveCount} | ` +
+            `hasNextPage: ${hasNextPage}`
+          );
+          
+          // 每5页显示一次产品示例
+          if (page % 5 === 0 || page === 1) {
+            console.log(`  示例产品: ${firstProduct.name.substring(0, 40)}...`);
+            console.log(`  创建时间: ${new Date(firstProduct.createdAt).toLocaleDateString()}`);
+          }
+        } else {
+          console.log(`ℹ️ 第 ${page} 页：0 个产品，hasNextPage = ${hasNextPage}`);
+        }
+
+        results.push({
+          page,
+          count: edges.length,
+          hasNextPage,
+          endCursorShort: cursor ? cursor.substring(0, 20) + '...' : null,
+          firstProductId: edges.length > 0 ? edges[0].node.id : null
+        });
+
+        // 固定延迟：每页之间等待3秒，避免Throttled
+        if (hasNextPage) {
+          console.log(`⏳ 等待3秒后请求下一页...`);
+          await delay(3000);
+        }
+
+        // 进度检查
+        if (totalActiveCount > 0) {
+          const progress = ((totalProducts / totalActiveCount) * 100).toFixed(1);
+          if (page % 10 === 0) {
+            console.log(`📈 进度: ${progress}% (${totalProducts}/${totalActiveCount})`);
+          }
+        }
+
+        // 安全限制
+        if (page > 200) { // 最多200页
+          console.log("⚠️ 安全限制：超过200页，停止测试");
+          break;
+        }
+
+        // 如果已经获取了所有产品，提前结束
+        if (totalActiveCount > 0 && totalProducts >= totalActiveCount) {
+          console.log(`🎯 已获取所有 ${totalProducts} 个产品，提前结束`);
+          hasNextPage = false;
+        }
+
+      } catch (error) {
+        if (error.message.includes("Throttled")) {
+          throttledCount++;
+          console.error(`❌ 第 ${page} 页：严重节流，停止测试`);
+          
+          if (throttledCount >= 2) {
+            console.error("🛑 连续两次被严重节流，停止测试");
+            break;
+          }
+        } else {
+          console.error(`❌ 第 ${page} 页请求失败:`, error.message);
+        }
+        
+        // 记录失败页
+        results.push({
+          page,
+          count: 0,
+          hasNextPage: false,
+          error: error.message,
+          failed: true
+        });
+        
+        break;
       }
-    `;
-
-    const resp = await fetch(`https://${vendor}.onshopfront.com/api/v2/graphql`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${tokens.access_token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ query }),
-    });
-
-    const text = await resp.text();
-    let data;
-
-    try {
-      data = JSON.parse(text);
-    } catch (err) {
-      console.error("❌ GraphQL 返回非 JSON：", text.substring(0, 200));
-      return json({ error: "GraphQL 返回非 JSON", raw: text.substring(0, 200) }, { status: 500 });
     }
 
-    // 检查GraphQL错误
-    if (data.errors) {
-      console.error("❌ GraphQL 错误：", data.errors);
-      return json({ error: "GraphQL 错误", details: data.errors }, { status: 500 });
-    }
-
-    const edges = data.data?.products?.edges || [];
-    const pageInfo = data.data?.products?.pageInfo;
-    const pageTotalCount = data.data?.products?.totalCount ?? 0;
-
-    hasNextPage = pageInfo?.hasNextPage ?? false;
-    cursor = pageInfo?.endCursor ?? null;
-
-    totalProducts += edges.length;
-
-    // 显示更多详情
-    if (edges.length > 0) {
-      const firstProduct = edges[0].node;
-      const lastProduct = edges[edges.length - 1].node;
-      
-      console.log(
-        `第 ${page} 页：${edges.length} 个产品 | ` +
-        `累计: ${totalProducts} | ` +
-        `hasNextPage: ${hasNextPage}`
-      );
-      
-      // 每5页显示一次产品示例
-      if (page % 5 === 0 || page === 1) {
-        console.log(`  第一个产品: ${firstProduct.name.substring(0, 30)}... (${firstProduct.status})`);
-        console.log(`  创建时间: ${new Date(firstProduct.createdAt).toLocaleDateString()}`);
-      }
-    } else {
-      console.log(`第 ${page} 页：0 个产品，hasNextPage = ${hasNextPage}`);
-    }
-
-    results.push({
-      page,
-      count: edges.length,
-      hasNextPage,
-      endCursor: cursor ? cursor.substring(0, 20) + '...' : null,
-      firstProductId: edges.length > 0 ? edges[0].node.id : null,
-      lastProductId: edges.length > 0 ? edges[edges.length - 1].node.id : null
-    });
-
-    // 添加延迟避免速率限制（每3页延迟一次）
-    if (hasNextPage && page % 3 === 0) {
-      console.log("⏳ 添加1秒延迟避免速率限制...");
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-
-    // 安全避免死循环（如果活跃产品太多）
-    if (page > 200) { // 200页 * 50个 = 最多10000个产品
-      console.log("⚠️ 安全限制：超过200页，停止测试");
-      break;
-    }
-    
-    // 如果已经很久没有获取到产品，停止
-    if (page > 10 && totalProducts === 0) {
-      console.log("⚠️ 已获取10页但无产品，停止测试");
-      break;
-    }
+  } catch (error) {
+    console.error("❌ 初始化失败:", error.message);
+    return json({ 
+      error: "测试失败: " + error.message 
+    }, { status: 500 });
   }
 
   console.log("🎉 分页测试结束");
@@ -162,22 +235,36 @@ export async function loader() {
   console.log(`📊 测试页数: ${results.length}`);
 
   // 分析结果
-  const pagesWithProducts = results.filter(r => r.count > 0).length;
-  const pagesWithoutProducts = results.filter(r => r.count === 0).length;
+  const successfulPages = results.filter(r => !r.failed && r.count > 0).length;
+  const emptyPages = results.filter(r => !r.failed && r.count === 0).length;
+  const failedPages = results.filter(r => r.failed).length;
   
-  console.log(`📊 有产品的页数: ${pagesWithProducts}`);
-  console.log(`📊 无产品的页数: ${pagesWithoutProducts}`);
+  console.log(`📊 成功页数: ${successfulPages}`);
+  console.log(`📊 空页数: ${emptyPages}`);
+  console.log(`📊 失败页数: ${failedPages}`);
+  
+  if (throttledCount > 0) {
+    console.log(`⚠️ 被节流次数: ${throttledCount}`);
+  }
 
   return json({
     ok: true,
-    message: "分页测试完成（只获取ACTIVE产品）",
+    message: "分页测试完成",
     summary: {
       totalPages: results.length,
       totalProducts,
-      pagesWithProducts,
-      pagesWithoutProducts
+      successfulPages,
+      emptyPages,
+      failedPages,
+      throttledCount,
+      lastCursor: cursor
     },
-    pagesTested: results.length,
     details: results,
+    recommendations: throttledCount > 0 ? [
+      "API有严格速率限制",
+      "建议每页之间等待5秒以上",
+      "考虑分批同步（如每次同步10页）",
+      "或按分类分别同步"
+    ] : []
   });
 }
