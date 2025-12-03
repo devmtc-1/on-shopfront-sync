@@ -51,7 +51,7 @@ export async function loader() {
     return json({ error: "请先授权再测试" }, { status: 401 });
   }
 
-  const CATEGORY_ID = "11e718d3cac71ecaa6100a1468096c0d";
+  const CATEGORY_ID = "11e96ba509ddf5a487c00ab419c1109c";
   
   let cursor = null;
   let hasNextPage = true;
