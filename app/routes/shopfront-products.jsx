@@ -47,7 +47,14 @@ export async function loader() {
   console.log(`🚀 开始同步产品: 第${SYNC_CONFIG.START_PAGE}页到第${SYNC_CONFIG.END_PAGE}页`);
 
   // 异步执行同步，立即返回响应
-  setTimeout(() => executeSync(tokens.access_token, vendor), 0);
+  setTimeout(() => {
+    console.log("🔄 开始异步执行同步任务");
+    executeSync(tokens.access_token, vendor).catch(error => {
+      console.error("🛑 异步任务执行失败:", error);
+      syncStatus.error = `异步任务失败: ${error.message}`;
+      syncStatus.isRunning = false;
+    });
+  }, 0);
 
   return json({
     ok: true,
@@ -59,6 +66,7 @@ export async function loader() {
 // 异步执行同步任务
 async function executeSync(accessToken, vendor) {
   try {
+    console.log("🔧 executeSync 开始执行");
     // 1. 先找到第16页的起始cursor
     let currentCursor = null;
     console.log(`🔍 定位第${SYNC_CONFIG.START_PAGE}页起始位置...`);
@@ -73,14 +81,19 @@ async function executeSync(accessToken, vendor) {
           currentCursor
         );
         
-        console.log(`📍 fetchProductsPage 返回:`, JSON.stringify(result).substring(0, 200));
+        console.log(`📍 fetchProductsPage 返回:`, typeof result, result ? Object.keys(result) : 'null');
         
         // 检查返回结果
-        if (!result || result.error) {
-          throw new Error(result?.error || "获取产品页失败");
+        if (!result) {
+          throw new Error("fetchProductsPage 返回了 null 或 undefined");
+        }
+        
+        if (result.error) {
+          throw new Error(result.error);
         }
         
         if (!result.products || !Array.isArray(result.products)) {
+          console.error("❌ 产品数据格式错误:", result);
           throw new Error("产品数据格式错误");
         }
         
@@ -99,7 +112,7 @@ async function executeSync(accessToken, vendor) {
         
       } catch (error) {
         console.error(`❌ 定位第${page}页失败:`, error.message);
-        console.error("错误详情:", error);
+        console.error("错误堆栈:", error.stack);
         syncStatus.error = `定位第${page}页失败: ${error.message}`;
         syncStatus.isRunning = false;
         return;
@@ -122,14 +135,19 @@ async function executeSync(accessToken, vendor) {
           currentCursor
         );
 
-        console.log(`🔄 fetchProductsPage 返回:`, JSON.stringify(result).substring(0, 200));
+        console.log(`🔄 fetchProductsPage 返回:`, typeof result, result ? Object.keys(result) : 'null');
 
         // 检查返回结果
-        if (!result || result.error) {
-          throw new Error(result?.error || "获取产品页失败");
+        if (!result) {
+          throw new Error("fetchProductsPage 返回了 null 或 undefined");
+        }
+
+        if (result.error) {
+          throw new Error(result.error);
         }
 
         if (!result.products || !Array.isArray(result.products)) {
+          console.error("❌ 产品数据格式错误:", result);
           throw new Error("产品数据格式错误");
         }
 
@@ -170,7 +188,7 @@ async function executeSync(accessToken, vendor) {
 
       } catch (error) {
         console.error(`❌ 第${page}页同步失败:`, error.message);
-        console.error("错误详情:", error);
+        console.error("错误堆栈:", error.stack);
         
         syncStatus.details.push({
           page,
@@ -197,7 +215,7 @@ async function executeSync(accessToken, vendor) {
     }
 
   } catch (error) {
-    console.error("同步过程出错:", error);
+    console.error("🛑 同步过程出错:", error.message);
     console.error("完整错误堆栈:", error.stack);
     syncStatus.error = error.message;
     syncStatus.isRunning = false;
@@ -206,42 +224,44 @@ async function executeSync(accessToken, vendor) {
 
 // 获取单页产品数据（带重试机制）
 async function fetchProductsPage(accessToken, vendor, first, after = null) {
-  const query = `
-    {
-      products(first: ${first} ${after ? `, after: "${after}"` : ""}) {
-        edges {
-          cursor
-          node {
-            id
-            name
-            description
-            status
-            type
-            category { id name }
-            brand { id name }
-            image
-            alternateImages
-            createdAt
-            updatedAt
-            prices { quantity price priceEx decimalPlaceLength priceSet { id name } }
-            barcodes { code quantity lastSoldAt promotionPrice outletPromotionPrices { outlet { id name } price } }
-            inventory { outlet { id name } quantity singleLevel caseLevel reorderLevel reorderAmount maxQuantity }
-          }
-        }
-        pageInfo { 
-          hasNextPage 
-          endCursor 
-        }
-      }
-    }
-  `;
-
+  console.log(`📡 fetchProductsPage 开始: first=${first}, after=${after ? '...' + after.slice(-20) : 'null'}`);
+  
   let retryCount = 0;
 
   while (retryCount < SYNC_CONFIG.MAX_RETRIES) {
     try {
-      console.log(`📡 发送请求: first=${first}, after=${after ? '...' + after.slice(-20) : 'null'}`);
+      console.log(`📡 发送请求 (重试 ${retryCount}/${SYNC_CONFIG.MAX_RETRIES}): first=${first}, after=${after ? '...' + after.slice(-20) : 'null'}`);
       
+      const query = `
+        {
+          products(first: ${first} ${after ? `, after: "${after}"` : ""}) {
+            edges {
+              cursor
+              node {
+                id
+                name
+                description
+                status
+                type
+                category { id name }
+                brand { id name }
+                image
+                alternateImages
+                createdAt
+                updatedAt
+                prices { quantity price priceEx decimalPlaceLength priceSet { id name } }
+                barcodes { code quantity lastSoldAt promotionPrice outletPromotionPrices { outlet { id name } price } }
+                inventory { outlet { id name } quantity singleLevel caseLevel reorderLevel reorderAmount maxQuantity }
+              }
+            }
+            pageInfo { 
+              hasNextPage 
+              endCursor 
+            }
+          }
+        }
+      `;
+
       const response = await fetch(`https://${vendor}.onshopfront.com/api/v2/graphql`, {
         method: "POST",
         headers: {
@@ -261,17 +281,27 @@ async function fetchProductsPage(accessToken, vendor, first, after = null) {
       
       if (text.length < 100) {
         console.log(`📥 响应内容: ${text}`);
-      } else {
-        console.log(`📥 响应前200字符: ${text.substring(0, 200)}...`);
       }
       
       let data;
       try {
         data = JSON.parse(text);
+        console.log(`📥 JSON解析成功`);
       } catch (err) {
         console.error("❌ JSON解析失败:", err.message);
         console.error("❌ 原始文本:", text);
-        throw new Error(`GraphQL返回非JSON数据: ${text.substring(0, 100)}...`);
+        
+        // 检查是否是HTML响应（可能是错误页面）
+        if (text.includes('<html') || text.includes('<!DOCTYPE')) {
+          console.error("❌ 服务器返回了HTML页面，可能是认证错误或服务器错误");
+          return {
+            error: `服务器返回HTML页面，可能是认证错误。响应: ${text.substring(0, 200)}...`
+          };
+        }
+        
+        return {
+          error: `GraphQL返回非JSON数据: ${text.substring(0, 100)}...`
+        };
       }
 
       // 检查API错误
@@ -297,7 +327,7 @@ async function fetchProductsPage(accessToken, vendor, first, after = null) {
 
       // 检查数据结构
       if (!data.data) {
-        console.error("❌ API返回无data字段:", JSON.stringify(data));
+        console.error("❌ API返回无data字段:", typeof data, Object.keys(data));
         return {
           error: "API返回无data字段",
           rawData: data
@@ -305,7 +335,7 @@ async function fetchProductsPage(accessToken, vendor, first, after = null) {
       }
 
       if (!data.data.products) {
-        console.error("❌ API返回无products字段:", JSON.stringify(data.data));
+        console.error("❌ API返回无products字段:", typeof data.data, Object.keys(data.data));
         return {
           error: "API返回无products字段",
           rawData: data.data
@@ -320,21 +350,24 @@ async function fetchProductsPage(accessToken, vendor, first, after = null) {
       const pageInfo = data.data.products.pageInfo || {};
       
       console.log(`✅ 获取成功: ${edges.length}个产品`);
-      if (edges.length > 0) {
-        console.log(`✅ 第一个产品: ${edges[0]?.node?.id || '未知'} - ${edges[0]?.node?.name || '未知'}`);
+      
+      // 安全地映射产品
+      const products = [];
+      for (const edge of edges) {
+        if (edge && edge.node) {
+          products.push(edge.node);
+        }
       }
       
       return {
-        products: edges.map(edge => edge.node).filter(node => node), // 过滤掉null节点
+        products: products,
         nextCursor: pageInfo.endCursor || null,
         hasNextPage: pageInfo.hasNextPage || false,
         rawData: data // 用于调试
       };
 
     } catch (error) {
-      retryCount++;
-      console.error(`⚠️ 请求失败 (${retryCount}/${SYNC_CONFIG.MAX_RETRIES}):`, error.message);
-      console.error("错误堆栈:", error.stack);
+      console.error(`⚠️ fetch 请求失败 (${retryCount}/${SYNC_CONFIG.MAX_RETRIES}):`, error.message);
       
       if (retryCount >= SYNC_CONFIG.MAX_RETRIES) {
         // 返回错误对象而不是抛出异常
@@ -343,6 +376,7 @@ async function fetchProductsPage(accessToken, vendor, first, after = null) {
         };
       }
       
+      retryCount++;
       const delay = Math.pow(2, retryCount) * 1000;
       console.log(`⏳ 等待${delay/1000}秒后重试...`);
       await new Promise(resolve => setTimeout(resolve, delay));
@@ -350,6 +384,7 @@ async function fetchProductsPage(accessToken, vendor, first, after = null) {
   }
 
   // 如果循环结束但未返回，返回错误
+  console.error("❌ fetchProductsPage 超出最大重试次数");
   return {
     error: "获取产品数据失败，超出最大重试次数"
   };
@@ -358,7 +393,7 @@ async function fetchProductsPage(accessToken, vendor, first, after = null) {
 // 导入产品到数据库
 async function importProducts(products) {
   if (!Array.isArray(products)) {
-    console.error("❌ importProducts: products 不是数组:", products);
+    console.error("❌ importProducts: products 不是数组:", typeof products);
     return 0;
   }
   
@@ -422,4 +457,22 @@ function mapProductData(shopfrontProduct) {
     updatedAt: new Date(shopfrontProduct.updatedAt),
     // 其他字段...
   };
+}
+
+// 添加一个重置端点
+export async function action() {
+  syncStatus = {
+    isRunning: false,
+    currentPage: 0,
+    totalPages: SYNC_CONFIG.END_PAGE - SYNC_CONFIG.START_PAGE + 1,
+    importedCount: 0,
+    error: null,
+    details: []
+  };
+  
+  return json({
+    ok: true,
+    message: "同步状态已重置",
+    syncStatus
+  });
 }
