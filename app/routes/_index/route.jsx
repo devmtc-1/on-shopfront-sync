@@ -119,82 +119,164 @@ export default function IndexRoute() {
   //     setSyncing(false);
   //   }
   // };
-  
 const syncProductsToShopify = async () => {
   setSyncing(true);
   setSyncResult(null);
   setProgress(0);
   setErrors([]);
-  setProducts([]);
+  setProducts([]); // Clear previous product list
 
   try {
-    // 1. 启动后台任务
-    const startResp = await fetch("/start-sync", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        pageSize: 50,
-        categoryId: "11e96ba509ddf5a487c00ab419c1109c" // 可选：如果要按分类同步
-      }),
-    });
+    let cursor = null;
+    let hasNextPage = true;
+    const pageSize = 50;
+    const allProducts = []; // 存储所有产品
+    let totalProducts = 0;
 
-    const startData = await startResp.json();
-    if (!startData.success) {
-      throw new Error(startData.error || "启动任务失败");
+    // 第一阶段：获取所有产品
+    console.log("📥 第一阶段：开始获取所有产品...");
+    
+    while (hasNextPage) {
+      const params = new URLSearchParams({ first: pageSize });
+      if (cursor) params.set("after", cursor);
+
+      console.log(`📄 获取产品页面，cursor: ${cursor ? cursor.substring(0, 20) + '...' : '第一页'}`);
+      
+      const resp = await fetch(`/shopfront-products?${params.toString()}`);
+      const data = await resp.json();
+
+      if (data.errors?.length) {
+        setErrors(prev => [...prev, ...data.errors]);
+        console.error("获取产品时出错:", data.errors);
+      }
+
+      const productsPage = data.products.map(e => e.node);
+      allProducts.push(...productsPage);
+
+      // 设置总产品数
+      if (!totalProducts && data.totalCount) {
+        totalProducts = data.totalCount;
+        setTotalCount(totalProducts);
+        console.log(`📊 总产品数: ${totalProducts}`);
+      }
+
+      console.log(`✅ 获取 ${productsPage.length} 个产品，累计: ${allProducts.length}`);
+      
+      // 更新进度（获取阶段的进度）
+      const fetchProgress = totalProducts 
+        ? Math.round((allProducts.length / totalProducts) * 100) 
+        : 0;
+      setProgress(fetchProgress);
+
+      // 下一页
+      hasNextPage = data.pageInfo?.hasNextPage || false;
+      cursor = data.pageInfo?.endCursor || null;
+
+      // 添加延迟避免速率限制
+      if (hasNextPage) {
+        console.log("⏳ 等待2秒后获取下一页...");
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
     }
 
-    const taskId = startData.taskId;
-    console.log("后台同步任务已启动，ID:", taskId);
+    console.log(`🎉 产品获取完成，共 ${allProducts.length} 个产品`);
+    
+    // 将所有产品设置到state中
+    setProducts(allProducts);
 
-    // 2. 开始轮询任务状态
-    const pollInterval = setInterval(async () => {
+    // 第二阶段：同步所有产品
+    console.log("🔄 第二阶段：开始同步产品...");
+    const results = [];
+    
+    for (let i = 0; i < allProducts.length; i++) {
+      const product = allProducts[i];
+      console.log(`📦 同步产品 ${i + 1}/${allProducts.length}: ${product.name}`);
+
       try {
-        const checkResp = await fetch(`/check-sync?taskId=${taskId}`);
-        const checkData = await checkResp.json();
+        const importResp = await fetch("/import-products", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ product }),
+        });
 
-        if (!checkData.success) {
-          clearInterval(pollInterval);
-          setSyncing(false);
-          alert("查询任务状态失败: " + checkData.error);
-          return;
+        let importData;
+        const text = await importResp.text();
+        try { 
+          importData = JSON.parse(text); 
+        } catch (err) {
+          results.push({ 
+            productId: product.id, 
+            productName: product.name,
+            success: false, 
+            error: "JSON解析失败" 
+          });
+          console.error(`❌ 产品 ${product.name} 同步失败: JSON解析失败`);
+          continue;
         }
 
-        // 更新前端状态
-        setProgress(checkData.progress);
-        setTotalCount(checkData.totalProducts);
-        // 可以只更新部分产品用于展示
-        if (checkData.products && checkData.products.length > 0) {
-          setProducts(checkData.products);
+        if (importData.success) {
+          results.push({ 
+            productId: product.id, 
+            productName: product.name,
+            success: true 
+          });
+          console.log(`✅ 产品 ${product.name} 同步成功`);
+        } else {
+          results.push({ 
+            productId: product.id, 
+            productName: product.name,
+            success: false, 
+            error: importData.error || "未知错误" 
+          });
+          console.error(`❌ 产品 ${product.name} 同步失败:`, importData.error);
         }
 
-        // 任务完成或失败，停止轮询
-        if (checkData.status === 'completed' || checkData.status === 'failed') {
-          clearInterval(pollInterval);
-          setSyncing(false);
-          setSyncResult(checkData.results);
-          setProducts(checkData.products || []); // 设置最终产品列表
-          
-          if (checkData.status === 'failed') {
-            alert("同步失败: " + checkData.error);
-          } else {
-            console.log("同步完成！", checkData);
-          }
-        }
-      } catch (pollError) {
-        console.error("轮询失败:", pollError);
+      } catch (error) {
+        results.push({ 
+          productId: product.id, 
+          productName: product.name,
+          success: false, 
+          error: error.message 
+        });
+        console.error(`❌ 产品 ${product.name} 请求失败:`, error.message);
       }
-    }, 2000); // 每2秒轮询一次
 
-    // 组件卸载或出错时清理定时器
-    return () => clearInterval(pollInterval);
+      // 更新同步进度
+      const syncProgress = Math.round(((i + 1) / allProducts.length) * 100);
+      setProgress(syncProgress);
+      
+      // 每个产品同步后添加延迟
+      if (i < allProducts.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 500)); // 500ms延迟
+      }
+    }
+
+    console.log("🎉 同步完成!");
+    
+    // 统计结果
+    const successCount = results.filter(r => r.success).length;
+    const failCount = results.filter(r => !r.success).length;
+    
+    console.log(`📊 同步统计: ${successCount} 成功, ${failCount} 失败`);
+    
+    if (failCount > 0) {
+      console.log("❌ 失败的产品:");
+      results.filter(r => !r.success).forEach(r => {
+        console.log(`  - ${r.productName}: ${r.error}`);
+      });
+    }
+
+    setSyncResult(results);
+    setProgress(100);
 
   } catch (err) {
     console.error("同步过程出错:", err);
-    alert("启动同步过程失败: " + err.message);
+    alert("Sync failed: " + err.message);
+  } finally {
     setSyncing(false);
   }
 };
-
+  
   return (
     <Page title="Product Sync">
       <Card sectioned>
