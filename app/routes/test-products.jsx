@@ -1,4 +1,4 @@
-// app/routes/test-category-products.jsx
+// app/routes/test-category-query.jsx
 import { json } from "@remix-run/node";
 import fetch from "node-fetch";
 import { getTokens } from "../utils/shopfrontTokens.server";
@@ -16,301 +16,370 @@ export async function loader() {
 
   const CATEGORY_ID = "11e96ba509ddf5a487c00ab419c1109c";
   
-  console.log(`🚀 开始同步分类 ${CATEGORY_ID} 的ACTIVE产品`);
+  console.log(`🔍 测试分类 ${CATEGORY_ID}`);
+  console.log(`🔧 Token长度: ${tokens.access_token.length}`);
 
-  let cursor = null;
-  let hasNextPage = true;
-  let page = 0;
-  let totalProducts = 0;
-
-  const results = [];
-  const allProducts = [];
+  const tests = [];
 
   try {
-    // 先获取该分类的ACTIVE产品总数
-    console.log("📊 获取分类ACTIVE产品总数...");
+    // 测试1: 验证分类是否存在
+    console.log("\n📋 测试1: 验证分类是否存在...");
     
-    const countQuery = `
+    const categoryQuery = `
       {
-        products(first: 1, categories: ["${CATEGORY_ID}"], statuses: [ACTIVE]) {
-          totalCount
+        category(id: "${CATEGORY_ID}") {
+          id
+          name
+          description
+          productsCount
+          children { edges { node { id name } } }
+          parent { id name }
         }
       }
     `;
 
-    const countResp = await fetch(`https://${vendor}.onshopfront.com/api/v2/graphql`, {
+    const categoryResp = await fetch(`https://${vendor}.onshopfront.com/api/v2/graphql`, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${tokens.access_token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ query: countQuery }),
+      body: JSON.stringify({ query: categoryQuery }),
     });
 
-    const countData = await countResp.json();
-    const totalCount = countData.data?.products?.totalCount || 0;
+    const categoryText = await categoryResp.text();
+    const categoryData = JSON.parse(categoryText);
     
-    if (totalCount === 0) {
-      console.log(`ℹ️ 分类 ${CATEGORY_ID} 没有ACTIVE产品`);
-      return json({
-        ok: true,
-        message: "该分类没有ACTIVE产品",
-        totalCount: 0
-      });
+    tests.push({
+      name: "验证分类",
+      success: !categoryData.errors && categoryData.data?.category,
+      data: categoryData.data?.category || null,
+      errors: categoryData.errors || null
+    });
+
+    if (categoryData.errors) {
+      console.error("❌ 分类查询错误:", categoryData.errors);
+    } else if (categoryData.data?.category) {
+      const category = categoryData.data.category;
+      console.log(`✅ 分类存在: ${category.name}`);
+      console.log(`📊 产品数量: ${category.productsCount || 0}`);
+      console.log(`🔗 父分类: ${category.parent?.name || '无'}`);
+      console.log(`👶 子分类: ${category.children?.edges?.length || 0} 个`);
     }
-    
-    console.log(`✅ 分类ACTIVE产品总数: ${totalCount}`);
-    console.log(`📊 预计页数: ${Math.ceil(totalCount / 50)} (每页50个)`);
-    
-    // 等待2秒再开始分页
-    console.log("⏳ 等待2秒后开始分页...");
-    await delay(2000);
 
-    while (hasNextPage && page < 50) { // 安全限制：最多50页
-      page++;
+    await delay(1000);
 
-      // 获取指定分类的ACTIVE状态产品，每页50个
-      const query = `
-        {
-          products(
-            first: 50 
-            ${cursor ? `, after: "${cursor}"` : ""}
-            categories: ["${CATEGORY_ID}"]
-            statuses: [ACTIVE]
-          ) {
-            edges {
-              cursor
-              node { 
-                id 
-                name
-                status
-                description
-                type
-                category { id name }
-                brand { id name }
-                image
-                alternateImages
-                createdAt
-                updatedAt
-                prices { quantity price priceEx decimalPlaceLength priceSet { id name } }
-                barcodes { code quantity lastSoldAt promotionPrice outletPromotionPrices { outlet { id name } price } }
-                inventory { outlet { id name } quantity singleLevel caseLevel reorderLevel reorderAmount maxQuantity }
-              }
-            }
-            pageInfo { 
-              hasNextPage 
-              endCursor 
+    // 测试2: 查询该分类的所有产品（不带状态过滤）
+    console.log("\n📋 测试2: 查询该分类的所有产品（不带状态过滤）...");
+    
+    const productsNoFilterQuery = `
+      {
+        products(first: 5, categories: ["${CATEGORY_ID}"]) {
+          edges {
+            node {
+              id
+              name
+              status
+              category { id name }
             }
           }
-        }
-      `;
-
-      console.log(`📄 请求第 ${page} 页...`);
-
-      try {
-        const startTime = Date.now();
-        const resp = await fetch(`https://${vendor}.onshopfront.com/api/v2/graphql`, {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${tokens.access_token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ query }),
-          timeout: 60000 // 60秒超时
-        });
-
-        const responseTime = Date.now() - startTime;
-        
-        if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
-        }
-        
-        const text = await resp.text();
-        let data;
-
-        try {
-          data = JSON.parse(text);
-        } catch (err) {
-          console.error("❌ JSON解析失败:", text.substring(0, 200));
-          results.push({
-            page,
-            success: false,
-            error: "JSON解析失败",
-            responseTime
-          });
-          break;
-        }
-
-        if (data.errors) {
-          console.error("❌ GraphQL错误:", data.errors);
-          results.push({
-            page,
-            success: false,
-            error: data.errors[0]?.message || "GraphQL错误",
-            responseTime
-          });
-          break;
-        }
-
-        const edges = data.data?.products?.edges || [];
-        const pageInfo = data.data?.products?.pageInfo;
-
-        hasNextPage = pageInfo?.hasNextPage ?? false;
-        cursor = pageInfo?.endCursor ?? null;
-
-        const products = edges.map(edge => edge.node);
-        totalProducts += products.length;
-        
-        // 收集所有产品
-        allProducts.push(...products);
-
-        // 显示详情
-        if (products.length > 0) {
-          const firstProduct = products[0];
-          
-          console.log(
-            `✅ 第 ${page} 页：获取 ${products.length} 个产品 | ` +
-            `累计: ${totalProducts}/${totalCount} | ` +
-            `响应时间: ${responseTime}ms | ` +
-            `hasNextPage: ${hasNextPage}`
-          );
-          
-          console.log(`  示例产品: ${firstProduct.name}`);
-          console.log(`  产品ID: ${firstProduct.id}`);
-          console.log(`  状态: ${firstProduct.status}`);
-          
-          if (firstProduct.prices && firstProduct.prices.length > 0) {
-            console.log(`  价格: ${firstProduct.prices[0].price} (${firstProduct.prices[0].quantity}个)`);
+          pageInfo {
+            hasNextPage
+            endCursor
           }
-          
-          if (firstProduct.barcodes && firstProduct.barcodes.length > 0) {
-            console.log(`  条码: ${firstProduct.barcodes[0].code}`);
+          totalCount
+        }
+      }
+    `;
+
+    const productsNoFilterResp = await fetch(`https://${vendor}.onshopfront.com/api/v2/graphql`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${tokens.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query: productsNoFilterQuery }),
+    });
+
+    const productsNoFilterText = await productsNoFilterResp.text();
+    const productsNoFilterData = JSON.parse(productsNoFilterText);
+    
+    tests.push({
+      name: "查询分类产品（无状态过滤）",
+      success: !productsNoFilterData.errors,
+      data: {
+        totalCount: productsNoFilterData.data?.products?.totalCount || 0,
+        edges: productsNoFilterData.data?.products?.edges || [],
+        hasNextPage: productsNoFilterData.data?.products?.pageInfo?.hasNextPage || false
+      },
+      errors: productsNoFilterData.errors || null
+    });
+
+    if (productsNoFilterData.errors) {
+      console.error("❌ 产品查询错误:", productsNoFilterData.errors);
+    } else {
+      const products = productsNoFilterData.data?.products;
+      console.log(`✅ 查询成功`);
+      console.log(`📊 总产品数: ${products?.totalCount || 0}`);
+      
+      if (products?.edges && products.edges.length > 0) {
+        console.log(`📋 前${products.edges.length}个产品:`);
+        products.edges.forEach((edge, index) => {
+          console.log(`  ${index + 1}. ${edge.node.name} (状态: ${edge.node.status})`);
+        });
+      } else {
+        console.log(`ℹ️ 该分类下无产品`);
+      }
+    }
+
+    await delay(1000);
+
+    // 测试3: 查询该分类的ACTIVE产品
+    console.log("\n📋 测试3: 查询该分类的ACTIVE产品...");
+    
+    const productsActiveQuery = `
+      {
+        products(first: 5, categories: ["${CATEGORY_ID}"], statuses: [ACTIVE]) {
+          edges {
+            node {
+              id
+              name
+              status
+              category { id name }
+            }
           }
-        } else {
-          console.log(`ℹ️ 第 ${page} 页：0 个产品，hasNextPage = ${hasNextPage}`);
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+          totalCount
         }
+      }
+    `;
 
-        results.push({
-          page,
-          success: true,
-          count: products.length,
-          responseTime,
-          hasNextPage,
-          endCursorShort: cursor ? cursor.substring(0, 20) + '...' : null,
-          firstProductId: products.length > 0 ? products[0].id : null,
-          firstProductName: products.length > 0 ? products[0].name : null
+    const productsActiveResp = await fetch(`https://${vendor}.onshopfront.com/api/v2/graphql`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${tokens.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query: productsActiveQuery }),
+    });
+
+    const productsActiveText = await productsActiveResp.text();
+    const productsActiveData = JSON.parse(productsActiveText);
+    
+    tests.push({
+      name: "查询分类ACTIVE产品",
+      success: !productsActiveData.errors,
+      data: {
+        totalCount: productsActiveData.data?.products?.totalCount || 0,
+        edges: productsActiveData.data?.products?.edges || [],
+        hasNextPage: productsActiveData.data?.products?.pageInfo?.hasNextPage || false
+      },
+      errors: productsActiveData.errors || null
+    });
+
+    if (productsActiveData.errors) {
+      console.error("❌ ACTIVE产品查询错误:", productsActiveData.errors);
+    } else {
+      const products = productsActiveData.data?.products;
+      console.log(`✅ 查询成功`);
+      console.log(`📊 ACTIVE产品数: ${products?.totalCount || 0}`);
+      
+      if (products?.edges && products.edges.length > 0) {
+        console.log(`📋 前${products.edges.length}个ACTIVE产品:`);
+        products.edges.forEach((edge, index) => {
+          console.log(`  ${index + 1}. ${edge.node.name}`);
         });
+      } else {
+        console.log(`ℹ️ 该分类下无ACTIVE产品`);
+      }
+    }
 
-        // 固定延迟：每页之间等待2秒
-        if (hasNextPage) {
-          console.log(`⏳ 等待2秒后请求下一页...`);
-          await delay(2000);
+    await delay(1000);
+
+    // 测试4: 查询所有状态的产品
+    console.log("\n📋 测试4: 查询该分类的所有状态产品...");
+    
+    const productsAllStatusQuery = `
+      {
+        products(first: 5, categories: ["${CATEGORY_ID}"], statuses: [ACTIVE, DRAFT, ARCHIVED]) {
+          edges {
+            node {
+              id
+              name
+              status
+              category { id name }
+            }
+          }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+          totalCount
         }
+      }
+    `;
 
-        // 进度检查
-        if (totalCount > 0) {
-          const progress = ((totalProducts / totalCount) * 100).toFixed(1);
-          console.log(`📈 进度: ${progress}% (${totalProducts}/${totalCount})`);
-        }
+    const productsAllStatusResp = await fetch(`https://${vendor}.onshopfront.com/api/v2/graphql`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${tokens.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query: productsAllStatusQuery }),
+    });
 
-        // 如果已经获取了所有产品，提前结束
-        if (totalCount > 0 && totalProducts >= totalCount) {
-          console.log(`🎯 已获取所有 ${totalProducts} 个产品，提前结束`);
-          hasNextPage = false;
-        }
+    const productsAllStatusText = await productsAllStatusResp.text();
+    const productsAllStatusData = JSON.parse(productsAllStatusText);
+    
+    tests.push({
+      name: "查询分类所有状态产品",
+      success: !productsAllStatusData.errors,
+      data: {
+        totalCount: productsAllStatusData.data?.products?.totalCount || 0,
+        edges: productsAllStatusData.data?.products?.edges || [],
+        hasNextPage: productsAllStatusData.data?.products?.pageInfo?.hasNextPage || false
+      },
+      errors: productsAllStatusData.errors || null
+    });
 
-      } catch (error) {
-        console.error(`❌ 第 ${page} 页请求失败:`, error.message);
-        results.push({
-          page,
-          success: false,
-          error: error.message,
-          failed: true
+    if (productsAllStatusData.errors) {
+      console.error("❌ 所有状态产品查询错误:", productsAllStatusData.errors);
+    } else {
+      const products = productsAllStatusData.data?.products;
+      console.log(`✅ 查询成功`);
+      console.log(`📊 所有状态产品数: ${products?.totalCount || 0}`);
+      
+      if (products?.edges && products.edges.length > 0) {
+        console.log(`📋 前${products.edges.length}个产品（所有状态）:`);
+        products.edges.forEach((edge, index) => {
+          console.log(`  ${index + 1}. ${edge.node.name} (${edge.node.status})`);
         });
-        
-        // 如果是超时错误，可能是深度分页问题
-        if (error.message.includes("timeout") || error.message.includes("504")) {
-          console.log(`⚠️ 检测到超时，可能是深度分页问题`);
-          console.log(`💡 建议: 减少每页产品数量或按其他方式分批`);
+      } else {
+        console.log(`ℹ️ 该分类下无任何状态的产品`);
+      }
+    }
+
+    // 测试5: 不使用categories参数，看看是否有产品
+    console.log("\n📋 测试5: 查询所有ACTIVE产品（不限制分类）...");
+    
+    const allProductsQuery = `
+      {
+        products(first: 5, statuses: [ACTIVE]) {
+          edges {
+            node {
+              id
+              name
+              status
+              category { id name }
+            }
+          }
+          totalCount
         }
-        
-        break;
+      }
+    `;
+
+    const allProductsResp = await fetch(`https://${vendor}.onshopfront.com/api/v2/graphql`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${tokens.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query: allProductsQuery }),
+    });
+
+    const allProductsText = await allProductsResp.text();
+    const allProductsData = JSON.parse(allProductsText);
+    
+    tests.push({
+      name: "查询所有ACTIVE产品",
+      success: !allProductsData.errors,
+      data: {
+        totalCount: allProductsData.data?.products?.totalCount || 0,
+        edges: allProductsData.data?.products?.edges || []
+      },
+      errors: allProductsData.errors || null
+    });
+
+    if (allProductsData.errors) {
+      console.error("❌ 所有产品查询错误:", allProductsData.errors);
+    } else {
+      const products = allProductsData.data?.products;
+      console.log(`✅ 查询成功`);
+      console.log(`📊 全站ACTIVE产品总数: ${products?.totalCount || 0}`);
+      
+      if (products?.edges && products.edges.length > 0) {
+        console.log(`📋 示例产品:`);
+        products.edges.forEach((edge, index) => {
+          const categoryName = edge.node.category?.name || '无分类';
+          console.log(`  ${index + 1}. ${edge.node.name} (分类: ${categoryName})`);
+        });
       }
     }
 
   } catch (error) {
-    console.error("❌ 初始化失败:", error.message);
-    return json({ 
-      error: "测试失败: " + error.message 
-    }, { status: 500 });
-  }
-
-  console.log("\n🎉 分页测试结束");
-  console.log(`📊 分类 ${CATEGORY_ID} 总计获取: ${totalProducts} 个ACTIVE产品`);
-  console.log(`📊 测试页数: ${results.length}`);
-  
-  if (allProducts.length > 0) {
-    console.log(`📋 获取的产品列表 (前10个):`);
-    allProducts.slice(0, 10).forEach((product, index) => {
-      console.log(`  ${index + 1}. ${product.name} (ID: ${product.id})`);
+    console.error("❌ 测试过程出错:", error.message);
+    tests.push({
+      name: "测试过程",
+      success: false,
+      error: error.message
     });
-    
-    if (allProducts.length > 10) {
-      console.log(`  ... 还有 ${allProducts.length - 10} 个产品`);
-    }
   }
 
-  // 分析结果
-  const successfulPages = results.filter(r => r.success).length;
-  const failedPages = results.filter(r => !r.success).length;
+  console.log("\n🎯 测试结果汇总:");
+  console.log("=" .repeat(50));
   
-  console.log(`📊 成功页数: ${successfulPages}`);
-  console.log(`📊 失败页数: ${failedPages}`);
+  const successfulTests = tests.filter(t => t.success).length;
+  console.log(`✅ 成功测试: ${successfulTests}/${tests.length}`);
   
-  // 统计响应时间
-  const successfulResults = results.filter(r => r.success && r.responseTime);
-  if (successfulResults.length > 0) {
-    const avgResponseTime = successfulResults.reduce((sum, r) => sum + r.responseTime, 0) / successfulResults.length;
-    console.log(`⏱️ 平均响应时间: ${avgResponseTime.toFixed(0)}ms`);
-  }
+  tests.forEach((test, index) => {
+    console.log(`\n${index + 1}. ${test.name}: ${test.success ? '✅' : '❌'}`);
+    if (test.error) {
+      console.log(`   错误: ${test.error}`);
+    }
+    if (test.errors) {
+      console.log(`   GraphQL错误: ${JSON.stringify(test.errors)}`);
+    }
+    if (test.data) {
+      if (test.name.includes("分类")) {
+        console.log(`   分类信息: ${JSON.stringify(test.data, null, 2)}`);
+      } else if (test.name.includes("产品")) {
+        console.log(`   产品总数: ${test.data.totalCount || 0}`);
+        if (test.data.edges && test.data.edges.length > 0) {
+          console.log(`   示例产品:`);
+          test.data.edges.forEach((edge, i) => {
+            console.log(`     ${i + 1}. ${edge.node.name} (${edge.node.status})`);
+          });
+        }
+      }
+    }
+  });
 
   return json({
     ok: true,
-    message: `分类 ${CATEGORY_ID} ACTIVE产品分页测试完成`,
+    message: "分类查询测试完成",
     categoryId: CATEGORY_ID,
+    tests,
     summary: {
-      totalPages: results.length,
-      totalProducts,
-      successfulPages,
-      failedPages,
-      lastCursor: cursor,
-      expectedTotal: totalCount,
-      missingProducts: totalCount - totalProducts
+      totalTests: tests.length,
+      successfulTests: tests.filter(t => t.success).length,
+      failedTests: tests.filter(t => !t.success).length
     },
-    productCount: allProducts.length,
-    sampleProducts: allProducts.slice(0, 5).map(p => ({
-      id: p.id,
-      name: p.name,
-      status: p.status,
-      category: p.category?.name,
-      hasPrices: p.prices?.length > 0,
-      hasBarcodes: p.barcodes?.length > 0,
-      hasInventory: p.inventory?.length > 0
-    })),
-    details: results.map(r => ({
-      page: r.page,
-      success: r.success,
-      count: r.count,
-      responseTime: r.responseTime,
-      hasNextPage: r.hasNextPage,
-      error: r.error
-    })),
-    recommendations: [
-      "✅ 按分类同步是可行的",
-      "💡 可以使用这个模式同步其他分类",
-      "⏱️ 每页之间保持2-3秒延迟",
-      "🔍 监控响应时间，确保不会超时",
-      "📊 这个分类有20个ACTIVE产品，适合测试"
-    ]
+    analysis: {
+      possibleIssues: [
+        "分类ID可能不正确",
+        "产品可能不属于这个分类，而是属于子分类",
+        "API可能对categories参数有特殊要求",
+        "可能需要使用不同的查询方式"
+      ],
+      nextSteps: [
+        "检查分类ID是否正确",
+        "查看分类是否有子分类",
+        "尝试查询子分类的产品",
+        "检查产品的实际分类关系"
+      ]
+    }
   });
 }
