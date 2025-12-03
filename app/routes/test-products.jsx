@@ -66,7 +66,7 @@ export async function loader() {
     console.log("⏳ 等待2秒后开始分页...");
     await delay(2000);
 
-    while (hasNextPage) {
+    while (hasNextPage && page < 50) { // 安全限制：最多50页
       page++;
 
       // 获取指定分类的ACTIVE状态产品，每页50个
@@ -77,8 +77,6 @@ export async function loader() {
             ${cursor ? `, after: "${cursor}"` : ""}
             categories: ["${CATEGORY_ID}"]
             statuses: [ACTIVE]
-            sortKey: CREATED_AT
-            sortOrder: ASC
           ) {
             edges {
               cursor
@@ -103,7 +101,6 @@ export async function loader() {
               hasNextPage 
               endCursor 
             }
-            totalCount
           }
         }
       `;
@@ -123,6 +120,11 @@ export async function loader() {
         });
 
         const responseTime = Date.now() - startTime;
+        
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+        }
+        
         const text = await resp.text();
         let data;
 
@@ -211,12 +213,6 @@ export async function loader() {
           console.log(`📈 进度: ${progress}% (${totalProducts}/${totalCount})`);
         }
 
-        // 安全限制
-        if (page > 50) { // 最多50页（2500个产品）
-          console.log("⚠️ 安全限制：超过50页，停止测试");
-          break;
-        }
-
         // 如果已经获取了所有产品，提前结束
         if (totalCount > 0 && totalProducts >= totalCount) {
           console.log(`🎯 已获取所有 ${totalProducts} 个产品，提前结束`);
@@ -254,10 +250,14 @@ export async function loader() {
   console.log(`📊 测试页数: ${results.length}`);
   
   if (allProducts.length > 0) {
-    console.log(`📋 获取的产品列表:`);
-    allProducts.forEach((product, index) => {
+    console.log(`📋 获取的产品列表 (前10个):`);
+    allProducts.slice(0, 10).forEach((product, index) => {
       console.log(`  ${index + 1}. ${product.name} (ID: ${product.id})`);
     });
+    
+    if (allProducts.length > 10) {
+      console.log(`  ... 还有 ${allProducts.length - 10} 个产品`);
+    }
   }
 
   // 分析结果
@@ -297,7 +297,14 @@ export async function loader() {
       hasBarcodes: p.barcodes?.length > 0,
       hasInventory: p.inventory?.length > 0
     })),
-    details: results,
+    details: results.map(r => ({
+      page: r.page,
+      success: r.success,
+      count: r.count,
+      responseTime: r.responseTime,
+      hasNextPage: r.hasNextPage,
+      error: r.error
+    })),
     recommendations: [
       "✅ 按分类同步是可行的",
       "💡 可以使用这个模式同步其他分类",
