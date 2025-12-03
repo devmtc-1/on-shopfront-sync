@@ -13,7 +13,7 @@ export async function loader({ request }) {
   const url = new URL(request.url);
   const first = parseInt(url.searchParams.get("first") || "50", 10);
   const after = url.searchParams.get("after") || null;
-
+  const CATEGORY_ID = "11e96ba509ddf5a487c00ab419c1109c";
   const page = after ? `after=${after}` : "page=1";
 
   const fetchProducts = async (accessToken) => {
@@ -28,7 +28,7 @@ export async function loader({ request }) {
       body: JSON.stringify({
         query: `
 {
-products(first: ${first}${after ? `, after: "${after}"` : ""}, statuses: [ACTIVE]) {
+products(first: ${first}${after ? `, after: "${after}"` : ""}, categories: ["${CATEGORY_ID}"], statuses: [ACTIVE]) {
     edges {
       cursor
       node {
