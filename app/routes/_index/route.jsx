@@ -130,6 +130,8 @@ export default function IndexRoute() {
       
       for (let i = 0; i < allProducts.length; i++) {
         const product = allProducts[i];
+        console.log(product);
+        
         console.log(`📦 同步产品 ${i + 1}/${allProducts.length}: ${product.name}`);
 
         try {
@@ -291,4 +293,5 @@ export default function IndexRoute() {
     </Page>
   );
 }
+
 
