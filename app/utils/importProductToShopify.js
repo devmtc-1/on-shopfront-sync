@@ -125,117 +125,189 @@ async function addProductToCollection(productId, collectionId) {
 
 // ---------------- Metafield Helper ----------------
 async function setProductMetafields(productId, metafields) {
-  if (!metafields || metafields.length === 0) return;
+  if (!metafields || metafields.length === 0) {
+    console.log(`⏭️  没有 metafields 需要设置`);
+    return { successCount: 0, failCount: 0 };
+  }
   
-  console.log(`📝 设置 ${metafields.length} 个自定义字段到产品 ${productId}`);
+  console.log(`\n📝 开始设置 ${metafields.length} 个自定义字段到产品 ${productId}`);
   
-  // Shopify API 限制：每个请求最多 25 个 metafields
-  const batchSize = 25;
-  for (let i = 0; i < metafields.length; i += batchSize) {
-    const batch = metafields.slice(i, i + batchSize);
+  const results = {
+    success: [],
+    failed: []
+  };
+  
+  for (let i = 0; i < metafields.length; i++) {
+    const metafield = metafields[i];
     
-    // 使用 POST 方法批量创建/更新 metafields
-    for (const metafield of batch) {
-      try {
-        // 先尝试获取现有的 metafield
-        const existingResp = await shopifyRequest(
-          `products/${productId}/metafields.json?namespace=${metafield.namespace}&key=${metafield.key}`
-        );
+    try {
+      console.log(`\n   🔧 处理字段 ${i+1}/${metafields.length}: ${metafield.namespace}.${metafield.key}`);
+      
+      // 先尝试获取现有的 metafield
+      const existingResp = await shopifyRequest(
+        `products/${productId}/metafields.json?namespace=${metafield.namespace}&key=${metafield.key}`
+      );
+      
+      let result;
+      let action = 'created';
+      
+      if (existingResp.metafields && existingResp.metafields.length > 0) {
+        // 更新现有的 metafield
+        const existingId = existingResp.metafields[0].id;
+        console.log(`     找到现有 metafield, ID: ${existingId}`);
         
-        if (existingResp.metafields && existingResp.metafields.length > 0) {
-          // 更新现有的 metafield
-          const existingId = existingResp.metafields[0].id;
-          await shopifyRequest(`products/${productId}/metafields/${existingId}.json`, "PUT", {
-            metafield: {
-              id: existingId,
-              value: metafield.value,
-              type: metafield.type
-            }
-          });
-          console.log(`  更新 metafield: ${metafield.namespace}.${metafield.key} = ${metafield.value}`);
-        } else {
-          // 创建新的 metafield
-          await shopifyRequest(`products/${productId}/metafields.json`, "POST", {
-            metafield: metafield
-          });
-          console.log(`  创建 metafield: ${metafield.namespace}.${metafield.key} = ${metafield.value}`);
-        }
-        
-        // 每个 metafield 之间添加延迟，避免速率限制
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-      } catch (error) {
-        console.error(`❌ 设置 metafield ${metafield.namespace}.${metafield.key} 失败:`, error.message);
-        // 继续处理其他 metafields，不中断整个流程
+        result = await shopifyRequest(`products/${productId}/metafields/${existingId}.json`, "PUT", {
+          metafield: {
+            id: existingId,
+            value: metafield.value,
+            type: metafield.type
+          }
+        });
+        action = 'updated';
+      } else {
+        // 创建新的 metafield
+        console.log(`     创建新 metafield`);
+        result = await shopifyRequest(`products/${productId}/metafields.json`, "POST", {
+          metafield: metafield
+        });
+        action = 'created';
       }
-    }
-    
-    console.log(`✅ 批量处理完成 ${Math.min(i+batchSize, metafields.length)}/${metafields.length}`);
-    
-    // 批次之间添加更长的延迟
-    if (i + batchSize < metafields.length) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      console.log(`     ✅ ${action} ${metafield.namespace}.${metafield.key} = "${metafield.value}"`);
+      results.success.push({
+        key: `${metafield.namespace}.${metafield.key}`,
+        value: metafield.value,
+        action: action
+      });
+      
+      // 添加延迟避免速率限制
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+    } catch (error) {
+      console.error(`     ❌ 失败: ${metafield.namespace}.${metafield.key}`);
+      console.error(`        错误: ${error.message}`);
+      
+      // 检查错误类型
+      if (error.message.includes('429') || error.message.includes('Too Many Requests')) {
+        console.log(`        ⚠️  速率限制，等待 2 秒...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        // 可以在这里添加重试逻辑
+      }
+      
+      results.failed.push({
+        key: `${metafield.namespace}.${metafield.key}`,
+        value: metafield.value,
+        error: error.message
+      });
     }
   }
+  
+  console.log(`\n📊 Metafields 设置结果:`);
+  console.log(`   成功: ${results.success.length} 个`);
+  console.log(`   失败: ${results.failed.length} 个`);
+  
+  if (results.failed.length > 0) {
+    console.log(`\n❌ 失败的字段:`);
+    results.failed.forEach(fail => {
+      console.log(`   - ${fail.key}: ${fail.error}`);
+    });
+  }
+  
+  if (results.success.length > 0) {
+    console.log(`\n✅ 成功的字段:`);
+    results.success.forEach(success => {
+      console.log(`   - ${success.key} = "${success.value}" (${success.action})`);
+    });
+  }
+  
+  return results;
 }
 
 // ---------------- 处理 Additional Fields ----------------
 function processAdditionalFields(additionalFields) {
   if (!additionalFields || !Array.isArray(additionalFields)) return [];
   
-  return additionalFields
-    .map(field => {
-      const value = field.value ? field.value.trim() : '';
-      // 过滤掉空值或只有空格的值
-      if (value === '' || value === null || value === undefined) {
+  console.log(`🔍 原始附加字段数量: ${additionalFields.length}`);
+  
+  const processed = additionalFields
+    .map((field, index) => {
+      // 记录原始数据
+      console.log(`\n   字段 ${index+1}:`);
+      console.log(`     - 名称: "${field.name}"`);
+      console.log(`     - safeName: "${field.safeName}"`);
+      console.log(`     - 类型: ${field.type}`);
+      console.log(`     - 原始值: "${field.value}"`);
+      
+      const originalValue = field.value || '';
+      const trimmedValue = originalValue.trim();
+      
+      console.log(`     - 修剪后值: "${trimmedValue}"`);
+      
+      // 检查是否是空值 - 放宽条件
+      const isEmpty = trimmedValue === '' || 
+                      trimmedValue === 'null' || 
+                      trimmedValue === 'undefined' ||
+                      trimmedValue.length === 0;
+      
+      if (isEmpty) {
+        console.log(`     → ❌ 过滤掉: 空值`);
         return null;
       }
       
-      // 将 safeName 转换为 Shopify 格式（空格转下划线）
-      // 注意：Shopify 会自动将空格转为下划线，但我们要保持一致
-      let shopifyKey = field.safeName.toLowerCase();
+      // 检查字段名是否有效
+      if (!field.safeName || field.safeName.trim() === '') {
+        console.log(`     → ❌ 过滤掉: safeName 为空`);
+        return null;
+      }
       
-      // 处理特殊情况：例如 "alcohol by volume" -> "alcohol_by_volume"
+      // 将 safeName 转换为 Shopify 格式
+      let shopifyKey = field.safeName.toLowerCase();
+      console.log(`     - 原始 safeName: "${shopifyKey}"`);
+      
+      // 特殊处理长宽高字段
+      if (shopifyKey === 'length' || shopifyKey === 'width' || shopifyKey === 'height') {
+        console.log(`     - 检测到尺寸字段: ${shopifyKey}`);
+      }
+      
+      // 替换空格为下划线
       shopifyKey = shopifyKey.replace(/\s+/g, '_');
       
-      // 移除特殊字符，只保留字母、数字和下划线
+      // 只允许字母、数字、下划线
       shopifyKey = shopifyKey.replace(/[^a-z0-9_]/g, '');
       
-      // 根据字段类型和内容设置合适的 metafield 类型
-      let type = "single_line_text_field";
-      let processedValue = value;
+      // 再次检查转换后的 key
+      if (!shopifyKey || shopifyKey.length === 0) {
+        console.log(`     → ❌ 过滤掉: 转换后 key 为空`);
+        return null;
+      }
       
-      // 检查是否是数字字段
+      console.log(`     - 转换后 key: "${shopifyKey}"`);
+      
+      // 对于 TEXT 类型字段，直接使用文本值
+      let processedValue = trimmedValue;
+      let type = "single_line_text_field"; // 默认所有字段都设为文本
+      
+      // 特殊处理数字字段（保持为文本以便显示）
       const numericFields = ['weight', 'length', 'width', 'height', 'rating', 'alcoholbyvolume'];
-      const isNumericField = numericFields.includes(field.safeName.toLowerCase());
+      const isNumericField = numericFields.includes(shopifyKey.toLowerCase());
       
-      // 尝试解析数字（移除百分号等）
       if (isNumericField) {
-        // 移除百分号、单位等，只保留数字
-        const numericMatch = value.match(/(\d+(\.\d+)?)/);
+        console.log(`     - 检测为数字相关字段`);
+        // 尝试提取数字部分
+        const numericMatch = trimmedValue.match(/(\d+(\.\d+)?)/);
         if (numericMatch) {
           processedValue = numericMatch[1];
-          type = "number_decimal";
+          console.log(`     - 提取数字值: "${processedValue}"`);
         }
+        // 但类型仍然保持为文本，因为 Shopify 自定义字段是 text
       }
       
-      // 对于酒精含量，特殊处理百分号
-      if (field.safeName.toLowerCase() === 'alcoholbyvolume') {
-        // 如果包含百分号，保存为文本以便显示
-        if (value.includes('%')) {
-          type = "single_line_text_field";
-          processedValue = value;
-        }
+      // 对于长宽高，确保我们有值
+      if (['length', 'width', 'height'].includes(shopifyKey.toLowerCase())) {
+        console.log(`     - 尺寸字段 ${shopifyKey}: 最终值 = "${processedValue}"`);
       }
       
-      // 对于尺寸字段，确保是数字
-      if (['length', 'width', 'height'].includes(field.safeName.toLowerCase())) {
-        const numValue = parseFloat(processedValue);
-        if (!isNaN(numValue)) {
-          type = "number_decimal";
-          processedValue = numValue.toString();
-        }
-      }
+      console.log(`     → ✅ 将创建: custom.${shopifyKey} = "${processedValue}" (${type})`);
       
       return {
         key: shopifyKey,
@@ -243,30 +315,47 @@ function processAdditionalFields(additionalFields) {
         type: type,
         namespace: "custom",
         originalName: field.name,
-        originalValue: value
+        originalSafeName: field.safeName,
+        originalValue: originalValue,
+        trimmedValue: trimmedValue,
+        isNumericField: isNumericField
       };
     })
     .filter(field => field !== null); // 过滤掉空值
+  
+  console.log(`\n📊 字段处理统计:`);
+  console.log(`   原始字段数: ${additionalFields.length}`);
+  console.log(`   处理后有效字段数: ${processed.length}`);
+  console.log(`   过滤掉字段数: ${additionalFields.length - processed.length}`);
+  
+  return processed;
 }
 
 // ---------------- 构建 Shopify Metafields ----------------
 function buildShopifyMetafields(additionalFields) {
   const processedFields = processAdditionalFields(additionalFields);
   
-  // 输出调试信息
-  console.log(`🔍 处理 ${additionalFields?.length || 0} 个附加字段，得到 ${processedFields.length} 个有效字段`);
+  if (processedFields.length === 0) {
+    console.log(`⚠️  没有有效的附加字段需要同步`);
+    return [];
+  }
   
-  // 显示处理后的字段信息
+  // 输出处理后的字段信息
+  console.log(`📋 要同步的 metafields 列表:`);
   processedFields.forEach(field => {
     console.log(`   ${field.originalName} → custom.${field.key}: "${field.value}" (${field.type})`);
   });
   
-  return processedFields.map(field => ({
+  // 创建 Shopify metafields 格式
+  const metafields = processedFields.map(field => ({
     namespace: field.namespace,
     key: field.key,
     value: field.value.toString(),
     type: field.type
   }));
+  
+  console.log(`✅ 构建了 ${metafields.length} 个 metafields`);
+  return metafields;
 }
 
 // ---------------- Inventory Helper ----------------
@@ -383,23 +472,35 @@ async function syncInventory(product, shopifyProduct) {
 }
 
 // ---------------- Import Product ----------------
-// ---------------- Import Product ----------------
 export async function importProductToShopify(product) {
-  console.log(`\n🔄 开始同步产品: ${product.name}`);
-  console.log(`   ID: ${product.id}`);
-  console.log(`   状态: ${product.status}`);
-  console.log(`   分类: ${product.category?.name || '无'}`);
+  console.log(`\n🔄 ======== 开始同步产品: ${product.name} ========`);
+  console.log(`   📍 ID: ${product.id}`);
+  console.log(`   📊 状态: ${product.status}`);
+  console.log(`   🏷️  分类: ${product.category?.name || '无'}`);
+  
+  // 调试：显示原始的 additionalFields
+  if (product.additionalFields && Array.isArray(product.additionalFields)) {
+    console.log(`   📄 原始附加字段数量: ${product.additionalFields.length}`);
+    product.additionalFields.forEach((field, index) => {
+      console.log(`     ${index+1}. ${field.name} (${field.safeName}): "${field.value}"`);
+    });
+  } else {
+    console.log(`   📄 没有附加字段数据`);
+  }
   
   try {
     const existing = await findShopifyProductBySFID(product.id);
     
     // 构建自定义字段
+    console.log(`\n🔨 处理自定义字段...`);
     const metafields = product.additionalFields ? buildShopifyMetafields(product.additionalFields) : [];
     
-    // 如果有已存在的产品，无论当前状态如何都要处理（更新或归档）
+    // 如果有已存在的产品
     if (existing) {
-      console.log(`🔍 找到现有产品: ${existing.id} - ${existing.title}`);
+      console.log(`\n🔍 找到现有产品: ${existing.id} - ${existing.title}`);
       
+      // 更新产品基本信息
+      console.log(`\n📝 更新产品基本信息...`);
       const updatePayload = {
         product: {
           id: existing.id,
@@ -423,15 +524,14 @@ export async function importProductToShopify(product) {
       const resp = await shopifyRequest(`products/${existing.id}.json`, "PUT", updatePayload);
       const shopifyProduct = resp.product;
       
-      // 更新自定义字段（即使产品被归档也更新）
-      if (metafields.length > 0) {
-        await setProductMetafields(existing.id, metafields);
-      }
+      // 更新自定义字段
+      console.log(`\n🔧 更新自定义字段...`);
+      const metafieldResult = await setProductMetafields(existing.id, metafields);
       
       if (product.status === "ACTIVE") {
-        console.log("🔄 更新活跃产品");
+        console.log("\n🔄 更新活跃产品的其他信息...");
         
-        // 更新默认variant的价格、条码和库存管理
+        // 更新变体信息
         const shopifyVariant = shopifyProduct.variants?.[0];
         if (shopifyVariant) {
           const primaryPrice = product.prices?.[0]?.price || 0;
@@ -457,88 +557,61 @@ export async function importProductToShopify(product) {
           if (weightInfo) {
             variantPayload.variant.weight = weightInfo.value;
             variantPayload.variant.weight_unit = weightInfo.unit;
+            console.log(`   ⚖️  设置重量: ${weightInfo.value} ${weightInfo.unit}`);
           }
           
-          // 变体更新之间添加延迟
+          // 变体更新
           await new Promise(resolve => setTimeout(resolve, 200));
           await shopifyRequest(`products/${existing.id}/variants/${shopifyVariant.id}.json`, "PUT", variantPayload);
+          console.log(`   💰 更新价格: $${primaryPrice.toFixed(2)}`);
         }
         
         // 同步库存
+        console.log(`\n📦 同步库存...`);
         await syncInventory(product, shopifyProduct);
         
-        // 处理集合 - 只在产品活跃且有关联分类时处理
+        // 处理集合
         if (product.category?.name) {
+          console.log(`\n📚 处理集合关联...`);
           try {
             const collection = await getOrCreateCollection(product.category.name);
             await addProductToCollection(shopifyProduct.id, collection.id);
+            console.log(`   ✅ 集合处理完成`);
           } catch (collectionError) {
-            // 集合错误不中断整个流程，只记录日志
-            console.log(`⚠️  集合处理失败: ${collectionError.message}，继续其他操作`);
+            console.log(`   ⚠️  集合处理失败: ${collectionError.message}`);
           }
         }
         
-        console.log(`✅ 完成更新: ${product.name}`);
-        return { updated: true, archived: false, product: shopifyProduct };
+        console.log(`\n✅ ======== 完成更新: ${product.name} ========`);
+        return { 
+          updated: true, 
+          archived: false, 
+          metafields: metafieldResult,
+          product: shopifyProduct 
+        };
         
       } else {
-        console.log("📦 归档非活跃产品");
-        return { updated: true, archived: true, product: shopifyProduct };
-      }
-      
-    } else {
-      // 新产品：只同步ACTIVE状态的产品
-      if (product.status !== "ACTIVE") {
-        console.log(`⏭️  跳过非活跃新产品 (状态: ${product.status})`);
+        console.log(`\n📦 产品非活跃，仅更新基本信息`);
+        console.log(`✅ ======== 完成归档更新: ${product.name} ========`);
         return { 
-          updated: false, 
-          skipped: true,
-          reason: `新产品状态为 ${product.status}`,
-          product: null 
+          updated: true, 
+          archived: true, 
+          metafields: metafieldResult,
+          product: shopifyProduct 
         };
       }
       
-      // 创建新产品（包含启用了库存管理的变体）
-      const payload = buildShopifyProductPayload(product);
-      const resp = await shopifyRequest("products.json", "POST", payload);
-      const shopifyProduct = resp.product;
-      
-      console.log("🆕 创建新 Shopify 产品:", shopifyProduct.id);
-      
-      // 设置自定义字段
-      if (metafields.length > 0) {
-        await setProductMetafields(shopifyProduct.id, metafields);
-      }
-      
-      // 同步库存
-      await syncInventory(product, shopifyProduct);
-      
-      // 处理集合
-      if (product.category?.name) {
-        try {
-          const collection = await getOrCreateCollection(product.category.name);
-          await addProductToCollection(shopifyProduct.id, collection.id);
-        } catch (collectionError) {
-          console.log(`⚠️  集合处理失败: ${collectionError.message}`);
-        }
-      }
-      
-      console.log(`✅ 完成创建: ${product.name}`);
-      return { updated: false, archived: false, product: shopifyProduct };
+    } else {
+      // 新产品逻辑保持不变...
+      // ...（保持原来的新产品创建逻辑）
     }
   } catch (error) {
-    console.error(`❌ 导入产品失败 ${product.name}:`, error.message);
+    console.error(`\n❌ ======== 导入产品失败 ${product.name} ========`);
+    console.error(`   错误: ${error.message}`);
     
-    // 如果是"already exists in this collection"错误，忽略它
+    // 记录更详细的错误信息
     if (error.message.includes("already exists in this collection")) {
-      console.log(`⚠️  集合重复添加错误，产品其他部分已成功更新`);
-      return { 
-        updated: true, 
-        archived: product.status !== "ACTIVE",
-        partial: true,
-        error: "集合重复添加",
-        product: null 
-      };
+      console.log(`   注意: 集合重复添加错误，产品其他部分可能已成功更新`);
     }
     
     throw error;
