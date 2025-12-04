@@ -114,8 +114,8 @@ export default function IndexRoute() {
 
         // 添加延迟避免速率限制
         if (hasNextPage) {
-          console.log("⏳ 等待10秒后获取下一页...");
-          await new Promise(resolve => setTimeout(resolve, 10000));
+          console.log("⏳ 等待5秒后获取下一页...");
+          await new Promise(resolve => setTimeout(resolve, 5000));
         }
       }
 
@@ -293,6 +293,7 @@ export default function IndexRoute() {
     </Page>
   );
 }
+
 
 
 
