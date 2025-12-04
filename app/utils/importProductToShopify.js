@@ -404,10 +404,66 @@ function extractWeightFromFields(additionalFields) {
     unit: 'kg' // 根据你的数据调整单位
   };
 }
+// ---------------- 处理 Tags ----------------
+function processShopfrontTags(tags) {
+  if (!tags || !Array.isArray(tags) || tags.length === 0) {
+    console.log(`🏷️  无 Shopfront 标签数据`);
+    return [];
+  }
+  
+  console.log(`🏷️  处理 ${tags.length} 个 Shopfront 标签:`);
+  
+  const processedTags = [];
+  
+  for (let i = 0; i < tags.length; i++) {
+    const tag = tags[i];
+    
+    if (!tag || !tag.name || typeof tag.name !== 'string') {
+      console.log(`   ${i+1}. ❌ 无效标签对象`);
+      continue;
+    }
+    
+    const tagName = tag.name.trim();
+    
+    if (!tagName) {
+      console.log(`   ${i+1}. ❌ 标签名称为空`);
+      continue;
+    }
+    
+    console.log(`   ${i+1}. ✅ "${tagName}"`);
+    processedTags.push(tagName);
+  }
+  
+  console.log(`   → 有效标签: ${processedTags.length} 个`);
+  return processedTags;
+}
 
-// ---------------- Build Product Payload ----------------
-function buildShopifyProductPayload(product) {
+// ---------------- 构建 Shopify 标签 ----------------
+function buildShopifyTags(product) {
+  // 基础标签：SFID（用于产品匹配，必须保留）
   const sfIdTag = `SFID:${product.id}`;
+  
+  // 处理 Shopfront 标签
+  const shopfrontTags = processShopfrontTags(product.tags);
+  
+  // 组合所有标签：SFID 标签 + Shopfront 标签
+  const allTags = [sfIdTag, ...shopfrontTags];
+  
+  // 去重（确保 SFID 标签在最前面）
+  const uniqueTags = [sfIdTag, ...new Set(shopfrontTags)];
+  
+  console.log(`📌 最终标签 (${uniqueTags.length} 个):`);
+  console.log(`   1. ${sfIdTag} ← 匹配标签（始终保留）`);
+  shopfrontTags.forEach((tag, index) => {
+    console.log(`   ${index + 2}. ${tag}`);
+  });
+  
+  return uniqueTags;
+}
+// ---------------- 更新 Build Product Payload ----------------
+function buildShopifyProductPayload(product) {
+  const tags = buildShopifyTags(product);  // 使用新的标签构建函数
+  
   const images = [];
   if (product.image) images.push({ src: product.image });
   if (product.alternateImages?.length) product.alternateImages.forEach(img => img && images.push({ src: img }));
@@ -443,7 +499,7 @@ function buildShopifyProductPayload(product) {
       body_html: product.description || "",
       vendor: product.brand?.name || "Unknown",
       product_type: product.category?.name || "",
-      tags: [sfIdTag],
+      tags: tags,  // 使用构建的标签数组（包含 SFID）
       images,
       variants: [variant]
     }
@@ -480,24 +536,28 @@ async function syncInventory(product, shopifyProduct) {
 }
 
 // ---------------- Import Product ----------------
+// ---------------- 在 Import Product 中添加标签调试 ----------------
 export async function importProductToShopify(product) {
   console.log(`\n🔄 ======== 开始同步产品: ${product.name} ========`);
   console.log(`   📍 ID: ${product.id}`);
   console.log(`   📊 状态: ${product.status}`);
   console.log(`   🏷️  分类: ${product.category?.name || '无'}`);
   
-  // 调试：显示原始的 additionalFields
-  if (product.additionalFields && Array.isArray(product.additionalFields)) {
-    console.log(`   📄 原始附加字段数量: ${product.additionalFields.length}`);
-    product.additionalFields.forEach((field, index) => {
-      console.log(`     ${index+1}. ${field.name} (${field.safeName}): "${field.value}"`);
+  // 显示 Shopfront 标签信息
+  if (product.tags && Array.isArray(product.tags)) {
+    console.log(`\n🏷️  Shopfront 原始标签 (${product.tags.length} 个):`);
+    product.tags.forEach((tag, index) => {
+      console.log(`   ${index+1}. ${tag.name} (ID: ${tag.id})`);
     });
   } else {
-    console.log(`   📄 没有附加字段数据`);
+    console.log(`\n🏷️  无 Shopfront 标签数据`);
   }
   
   try {
     const existing = await findShopifyProductBySFID(product.id);
+    
+    // 构建标签（包含 SFID + Shopfront 标签）
+    const tags = buildShopifyTags(product);
     
     // 构建自定义字段
     console.log(`\n🔨 处理自定义字段...`);
@@ -507,8 +567,9 @@ export async function importProductToShopify(product) {
     if (existing) {
       console.log(`\n🔍 找到现有产品: ${existing.id} - ${existing.title}`);
       
-      // 更新产品基本信息
-      console.log(`\n📝 更新产品基本信息...`);
+      // 显示现有的 Shopify 标签
+      console.log(`\n🏷️  Shopify 现有标签: ${existing.tags || '无'}`);
+      
       const updatePayload = {
         product: {
           id: existing.id,
@@ -516,7 +577,7 @@ export async function importProductToShopify(product) {
           body_html: product.description || "",
           vendor: product.brand?.name || "Unknown",
           product_type: product.category?.name || "",
-          tags: [`SFID:${product.id}`],
+          tags: tags,  // 更新标签（包含 SFID）
           status: product.status === "ACTIVE" ? "active" : "archived",
         },
       };
@@ -591,6 +652,8 @@ export async function importProductToShopify(product) {
         }
         
         console.log(`\n✅ ======== 完成更新: ${product.name} ========`);
+        console.log(`   🏷️  标签已更新: ${tags.join(', ')}`);
+        
         return { 
           updated: true, 
           archived: false, 
@@ -601,6 +664,8 @@ export async function importProductToShopify(product) {
       } else {
         console.log(`\n📦 产品非活跃，仅更新基本信息`);
         console.log(`✅ ======== 完成归档更新: ${product.name} ========`);
+        console.log(`   🏷️  标签已更新（归档产品也保留标签）`);
+        
         return { 
           updated: true, 
           archived: true, 
@@ -610,18 +675,50 @@ export async function importProductToShopify(product) {
       }
       
     } else {
-      // 新产品逻辑保持不变...
-      // ...（保持原来的新产品创建逻辑）
+      // 新产品：只同步ACTIVE状态的产品
+      if (product.status !== "ACTIVE") {
+        console.log(`⏭️  跳过非活跃新产品 (状态: ${product.status})`);
+        return { 
+          updated: false, 
+          skipped: true,
+          reason: `新产品状态为 ${product.status}`,
+          product: null 
+        };
+      }
+      
+      // 创建新产品（包含启用了库存管理的变体）
+      const payload = buildShopifyProductPayload(product);
+      const resp = await shopifyRequest("products.json", "POST", payload);
+      const shopifyProduct = resp.product;
+      
+      console.log("🆕 创建新 Shopify 产品:", shopifyProduct.id);
+      
+      // 设置自定义字段
+      if (metafields.length > 0) {
+        await setProductMetafields(shopifyProduct.id, metafields);
+      }
+      
+      // 同步库存
+      await syncInventory(product, shopifyProduct);
+      
+      // 处理集合
+      if (product.category?.name) {
+        try {
+          const collection = await getOrCreateCollection(product.category.name);
+          await addProductToCollection(shopifyProduct.id, collection.id);
+        } catch (collectionError) {
+          console.log(`⚠️  集合处理失败: ${collectionError.message}`);
+        }
+      }
+      
+      console.log(`\n✅ ======== 完成创建: ${product.name} ========`);
+      console.log(`   🏷️  初始标签: ${tags.join(', ')}`);
+      
+      return { updated: false, archived: false, product: shopifyProduct };
     }
   } catch (error) {
     console.error(`\n❌ ======== 导入产品失败 ${product.name} ========`);
     console.error(`   错误: ${error.message}`);
-    
-    // 记录更详细的错误信息
-    if (error.message.includes("already exists in this collection")) {
-      console.log(`   注意: 集合重复添加错误，产品其他部分可能已成功更新`);
-    }
-    
     throw error;
   }
 }
