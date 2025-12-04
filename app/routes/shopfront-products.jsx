@@ -56,7 +56,7 @@ export async function loader({ request }) {
         type
         category { id name }
         brand { id name }
-        tags { id name color }
+        tags { id name }
         image
         alternateImages
         createdAt
