@@ -243,7 +243,7 @@ function processAdditionalFields(additionalFields) {
       
       console.log(`     - 修剪后值: "${trimmedValue}"`);
       
-      // 检查是否是空值 - 放宽条件
+      // 检查是否是空值
       const isEmpty = trimmedValue === '' || 
                       trimmedValue === 'null' || 
                       trimmedValue === 'undefined' ||
@@ -255,25 +255,25 @@ function processAdditionalFields(additionalFields) {
       }
       
       // 检查字段名是否有效
-      if (!field.safeName || field.safeName.trim() === '') {
-        console.log(`     → ❌ 过滤掉: safeName 为空`);
+      if (!field.name || field.name.trim() === '') {
+        console.log(`     → ❌ 过滤掉: name 为空`);
         return null;
       }
       
-      // 将 safeName 转换为 Shopify 格式
-      let shopifyKey = field.safeName.toLowerCase();
-      console.log(`     - 原始 safeName: "${shopifyKey}"`);
+      // 使用 name 字段创建 Shopify key（不是 safeName！）
+      let shopifyKey = field.name.toLowerCase();
+      console.log(`     - 原始名称: "${shopifyKey}"`);
       
-      // 特殊处理长宽高字段
-      if (shopifyKey === 'length' || shopifyKey === 'width' || shopifyKey === 'height') {
-        console.log(`     - 检测到尺寸字段: ${shopifyKey}`);
-      }
-      
-      // 替换空格为下划线
+      // 特殊处理：将空格替换为下划线（Shopify 格式）
       shopifyKey = shopifyKey.replace(/\s+/g, '_');
       
-      // 只允许字母、数字、下划线
+      // 移除特殊字符，只保留字母、数字、下划线
       shopifyKey = shopifyKey.replace(/[^a-z0-9_]/g, '');
+      
+      // 对于包含多个单词的字段，特殊处理
+      if (field.name.includes(' ')) {
+        console.log(`     - 多单词字段 "${field.name}" → Shopify key: "${shopifyKey}"`);
+      }
       
       // 再次检查转换后的 key
       if (!shopifyKey || shopifyKey.length === 0) {
@@ -285,10 +285,12 @@ function processAdditionalFields(additionalFields) {
       
       // 对于 TEXT 类型字段，直接使用文本值
       let processedValue = trimmedValue;
-      let type = "single_line_text_field"; // 默认所有字段都设为文本
+      let type = "single_line_text_field"; // 所有字段都设为文本
       
-      // 特殊处理数字字段（保持为文本以便显示）
-      const numericFields = ['weight', 'length', 'width', 'height', 'rating', 'alcoholbyvolume'];
+      // 特殊处理数字相关字段（但仍保持为文本类型）
+      const numericFields = ['weight', 'length', 'width', 'height', 'rating'];
+      
+      // 注意：这里也要使用转换后的 key 来检查
       const isNumericField = numericFields.includes(shopifyKey.toLowerCase());
       
       if (isNumericField) {
@@ -299,12 +301,12 @@ function processAdditionalFields(additionalFields) {
           processedValue = numericMatch[1];
           console.log(`     - 提取数字值: "${processedValue}"`);
         }
-        // 但类型仍然保持为文本，因为 Shopify 自定义字段是 text
       }
       
-      // 对于长宽高，确保我们有值
-      if (['length', 'width', 'height'].includes(shopifyKey.toLowerCase())) {
-        console.log(`     - 尺寸字段 ${shopifyKey}: 最终值 = "${processedValue}"`);
+      // 特殊处理酒精含量字段
+      if (field.name.toLowerCase().includes('alcohol') && field.name.toLowerCase().includes('volume')) {
+        console.log(`     - 酒精含量字段，保留原始值: "${trimmedValue}"`);
+        // 保留原始值（包含百分号）
       }
       
       console.log(`     → ✅ 将创建: custom.${shopifyKey} = "${processedValue}" (${type})`);
@@ -327,6 +329,12 @@ function processAdditionalFields(additionalFields) {
   console.log(`   原始字段数: ${additionalFields.length}`);
   console.log(`   处理后有效字段数: ${processed.length}`);
   console.log(`   过滤掉字段数: ${additionalFields.length - processed.length}`);
+  
+  // 特别显示处理后的字段映射关系
+  console.log(`\n🔀 字段映射关系:`);
+  processed.forEach(field => {
+    console.log(`   "${field.originalName}" → custom.${field.key}`);
+  });
   
   return processed;
 }
