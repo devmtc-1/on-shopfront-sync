@@ -15,7 +15,6 @@ export async function loader({ request }) {
   const after = url.searchParams.get("after") || null;
   const categoriesParam = url.searchParams.get("categories");
   
-  // 如果传入了分类ID参数，使用传入的分类ID
   let CATEGORY_IDS = [];
   if (categoriesParam) {
     CATEGORY_IDS = categoriesParam
@@ -24,7 +23,6 @@ export async function loader({ request }) {
       .filter(id => id.length > 0);
   }
   
-  // 如果没有传入分类ID，使用硬编码的默认值
   if (CATEGORY_IDS.length === 0) {
     CATEGORY_IDS = [
       "11e96ba509ddf5a487c00ab419c1109c", // Aperitif
@@ -54,15 +52,24 @@ export async function loader({ request }) {
         id
         name
         description
-        # ... 其他基础字段
-        
-        # Additional Information - 包含字段名和值
-        additionalValues {
-          id          # 字段ID
-          name        # 字段显示名称
-          safeName    # 字段安全名称（可能用于编程）
-          type        # 字段类型
-          value       # 字段值
+        status
+        type
+        category { id name }
+        brand { id name }
+        image
+        alternateImages
+        createdAt
+        updatedAt
+        prices { quantity price priceEx decimalPlaceLength priceSet { id name } }
+        barcodes { code quantity lastSoldAt promotionPrice outletPromotionPrices { outlet { id name } price } }
+        inventory { outlet { id name } quantity singleLevel caseLevel reorderLevel reorderAmount maxQuantity }
+        # 这里是 Additional Information - 使用正确的字段名 additionalFields
+        additionalFields {
+          id
+          name
+          safeName
+          type
+          value
         }
       }
     }
@@ -100,6 +107,15 @@ export async function loader({ request }) {
     const products = data.data.products.edges;
     const pageInfo = data.data.products.pageInfo;
     const totalCount = data.data.products.totalCount;
+
+    // 调试：检查第一个产品的 additionalFields
+    if (products.length > 0) {
+      const sampleProduct = products[0].node;
+      console.log("Sample product has additionalFields?", 'additionalFields' in sampleProduct);
+      if (sampleProduct.additionalFields) {
+        console.log("Additional fields found:", sampleProduct.additionalFields);
+      }
+    }
 
     return json({
       ok: true,
