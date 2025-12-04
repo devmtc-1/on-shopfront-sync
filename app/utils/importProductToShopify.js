@@ -98,6 +98,83 @@ async function addProductToCollection(productId, collectionId) {
   });
 }
 
+// ---------------- Metafield Helper ----------------
+async function setProductMetafields(productId, metafields) {
+  if (!metafields || metafields.length === 0) return;
+  
+  console.log(`📝 设置 ${metafields.length} 个自定义字段`);
+  
+  // Shopify API 限制：每个请求最多 25 个 metafields
+  const batchSize = 25;
+  for (let i = 0; i < metafields.length; i += batchSize) {
+    const batch = metafields.slice(i, i + batchSize);
+    
+    const batchPayload = {
+      metafields: batch
+    };
+    
+    try {
+      await shopifyRequest(`products/${productId}/metafields.json`, "PUT", batchPayload);
+      console.log(`✅ 批量设置 metafields ${i+1}-${Math.min(i+batchSize, metafields.length)} 完成`);
+      
+      // 批次之间添加延迟
+      if (i + batchSize < metafields.length) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    } catch (error) {
+      console.error(`❌ 批量设置 metafields 失败:`, error.message);
+      // 继续处理其他批次，不中断整个流程
+    }
+  }
+}
+
+// ---------------- 处理 Additional Fields ----------------
+function processAdditionalFields(additionalFields) {
+  if (!additionalFields || !Array.isArray(additionalFields)) return [];
+  
+  return additionalFields
+    .map(field => {
+      const value = field.value ? field.value.trim() : '';
+      // 过滤掉空值或只有空格的值
+      if (value === '' || value === null || value === undefined) {
+        return null;
+      }
+      
+      // 将 safeName 转换为 Shopify 格式（空格转下划线）
+      const shopifyKey = field.safeName.toLowerCase().replace(/\s+/g, '_');
+      
+      // 根据字段类型设置合适的 metafield 类型
+      let type = "single_line_text_field";
+      if (field.type === "NUMBER" || ['weight', 'length', 'width', 'height', 'rating'].includes(field.safeName.toLowerCase())) {
+        type = "number_decimal";
+      } else if (field.type === "SELECT" || field.type === "MULTISELECT") {
+        type = "list.single_line_text_field";
+      }
+      
+      return {
+        key: shopifyKey,
+        value: value,
+        type: type,
+        namespace: "custom",
+        originalName: field.name,
+        originalType: field.type
+      };
+    })
+    .filter(field => field !== null); // 过滤掉空值
+}
+
+// ---------------- 构建 Shopify Metafields ----------------
+function buildShopifyMetafields(additionalFields) {
+  const processedFields = processAdditionalFields(additionalFields);
+  
+  return processedFields.map(field => ({
+    namespace: field.namespace,
+    key: field.key,
+    value: field.value.toString(),
+    type: field.type
+  }));
+}
+
 // ---------------- Inventory Helper ----------------
 async function getShopifyLocations() {
   const resp = await shopifyRequest("locations.json");
@@ -123,7 +200,36 @@ function buildShopifyProductPayload(product) {
   const primaryPrice = product.prices?.[0]?.price || 0;
   const primaryBarcode = product.barcodes?.[0]?.code || "";
 
+  // 处理重量 - 从 additionalFields 中提取
+  let weight = null;
+  let weightUnit = 'kg'; // 默认单位
+  
+  if (product.additionalFields && Array.isArray(product.additionalFields)) {
+    const weightField = product.additionalFields.find(f => 
+      f.safeName.toLowerCase() === 'weight'
+    );
+    if (weightField && weightField.value && !isNaN(parseFloat(weightField.value.trim()))) {
+      weight = parseFloat(weightField.value.trim());
+    }
+  }
+
   // 创建产品时包含一个启用了库存管理的变体
+  const variant = {
+    price: primaryPrice.toFixed(2),
+    sku: primaryBarcode,
+    barcode: primaryBarcode,
+    inventory_management: "shopify",
+    inventory_quantity: 0,
+    requires_shipping: true,
+    inventory_policy: "deny"
+  };
+
+  // 如果找到重量，设置到变体
+  if (weight !== null) {
+    variant.weight = weight;
+    variant.weight_unit = weightUnit;
+  }
+
   return {
     product: {
       title: product.name,
@@ -132,18 +238,8 @@ function buildShopifyProductPayload(product) {
       product_type: product.category?.name || "",
       tags: [sfIdTag],
       images,
-      variants: [
-        {
-          price: primaryPrice.toFixed(2),
-          sku: primaryBarcode,
-          barcode: primaryBarcode,
-          inventory_management: "shopify", // 启用库存管理
-          inventory_quantity: 0,
-          requires_shipping: true,
-          inventory_policy: "deny", // 新增：设置为拒绝超卖
-        }
-      ],
-    },
+      variants: [variant]
+    }
   };
 }
 
@@ -182,6 +278,9 @@ export async function importProductToShopify(product) {
   
   const existing = await findShopifyProductBySFID(product.id);
   
+  // 构建自定义字段
+  const metafields = product.additionalFields ? buildShopifyMetafields(product.additionalFields) : [];
+  
   // 如果有已存在的产品，无论当前状态如何都要处理（更新或归档）
   if (existing) {
     const updatePayload = {
@@ -207,6 +306,11 @@ export async function importProductToShopify(product) {
     const resp = await shopifyRequest(`products/${existing.id}.json`, "PUT", updatePayload);
     const shopifyProduct = resp.product;
     
+    // 更新自定义字段（即使产品被归档也更新）
+    if (metafields.length > 0) {
+      await setProductMetafields(existing.id, metafields);
+    }
+    
     if (product.status === "ACTIVE") {
       console.log("🔄 更新活跃产品:", existing.id, product.name);
       
@@ -216,18 +320,35 @@ export async function importProductToShopify(product) {
         const primaryPrice = product.prices?.[0]?.price || 0;
         const primaryBarcode = product.barcodes?.[0]?.code || "";
         
+        // 处理重量
+        let weight = null;
+        if (product.additionalFields && Array.isArray(product.additionalFields)) {
+          const weightField = product.additionalFields.find(f => 
+            f.safeName.toLowerCase() === 'weight'
+          );
+          if (weightField && weightField.value && !isNaN(parseFloat(weightField.value.trim()))) {
+            weight = parseFloat(weightField.value.trim());
+          }
+        }
+        
         const variantPayload = {
           variant: {
             id: shopifyVariant.id,
             price: primaryPrice.toFixed(2),
             sku: primaryBarcode,
             barcode: primaryBarcode,
-            inventory_management: "shopify", // 确保启用库存管理
+            inventory_management: "shopify",
             inventory_quantity: 0,
             requires_shipping: true,
-            inventory_policy: "deny", // 新增：设置为拒绝超卖
+            inventory_policy: "deny"
           },
         };
+        
+        // 如果找到重量，设置到变体
+        if (weight !== null) {
+          variantPayload.variant.weight = weight;
+          variantPayload.variant.weight_unit = 'kg';
+        }
         
         // 变体更新之间添加延迟
         await new Promise(resolve => setTimeout(resolve, 200));
@@ -268,6 +389,11 @@ export async function importProductToShopify(product) {
     const shopifyProduct = resp.product;
     
     console.log("🆕 创建新 Shopify 产品:", shopifyProduct.id, product.name);
+    
+    // 设置自定义字段
+    if (metafields.length > 0) {
+      await setProductMetafields(shopifyProduct.id, metafields);
+    }
     
     // 同步库存和集合
     await syncInventory(product, shopifyProduct);
