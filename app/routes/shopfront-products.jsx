@@ -54,17 +54,16 @@ export async function loader({ request }) {
         id
         name
         description
-        status
-        type
-        category { id name }
-        brand { id name }
-        image
-        alternateImages
-        createdAt
-        updatedAt
-        prices { quantity price priceEx decimalPlaceLength priceSet { id name } }
-        barcodes { code quantity lastSoldAt promotionPrice outletPromotionPrices { outlet { id name } price } }
-        inventory { outlet { id name } quantity singleLevel caseLevel reorderLevel reorderAmount maxQuantity }
+        # ... 其他基础字段
+        
+        # Additional Information - 包含字段名和值
+        additionalValues {
+          id          # 字段ID
+          name        # 字段显示名称
+          safeName    # 字段安全名称（可能用于编程）
+          type        # 字段类型
+          value       # 字段值
+        }
       }
     }
     pageInfo { hasNextPage endCursor }
