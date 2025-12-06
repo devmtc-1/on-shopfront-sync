@@ -29,7 +29,6 @@ export default function IndexRoute() {
   const [startingCursor, setStartingCursor] = useState("");
   const [pagesToFetch, setPagesToFetch] = useState("5");
   const [fetchMode, setFetchMode] = useState("all"); // "all" 或 "partial"
-  const [successMessage, setSuccessMessage] = useState(""); // 成功消息
 
   const vendor = "plonk";
 
@@ -44,8 +43,6 @@ export default function IndexRoute() {
       if (!resp.ok) throw new Error(await resp.text());
       const data = await resp.json();
       setToken(data.access_token);
-      setSuccessMessage("Token 获取成功!");
-      setTimeout(() => setSuccessMessage(""), 3000);
     } catch (err) {
       alert("Error fetching token: " + err.message);
     } finally {
@@ -53,13 +50,14 @@ export default function IndexRoute() {
     }
   };
 
+  // 新增的函数：获取产品列表（不进行同步）
   const fetchProductsFromAPI = async () => {
     setLoadingProducts(true);
     setProducts([]);
     setErrors([]);
     setTotalCount(0);
     setProgress(0);
-    setSuccessMessage(""); // 清除之前的成功消息
+    setSyncResult(null);
 
     try {
       const categories = categoriesInput
@@ -113,18 +111,12 @@ export default function IndexRoute() {
       setTotalCount(data.totalCount || fetchedProducts.length);
       setProgress(100);
 
-      const message = `✅ 成功获取 ${fetchedProducts.length} 个产品`;
-      setSuccessMessage(message);
-      console.log(message);
+      console.log(`🎉 成功获取 ${fetchedProducts.length} 个产品`);
+      if (data.lastCursor) {
+        console.log(`📌 最后一页cursor: ${data.lastCursor}`);
+      }
       
-      // 显示获取结果
-      setTimeout(() => {
-        if (fetchMode === "partial") {
-          alert(`${message}\n\n模式: 部分获取\n起始cursor: ${startingCursor || "第一页"}\n获取页数: ${data.pagesFetched || pagesToFetch}\n总产品数: ${data.totalCount || fetchedProducts.length}`);
-        } else {
-          alert(`${message}\n\n模式: 全部分类产品\n总产品数: ${data.totalCount || fetchedProducts.length}`);
-        }
-      }, 500);
+      alert(`成功获取 ${fetchedProducts.length} 个产品`);
       
     } catch (err) {
       alert("获取产品出错: " + err.message);
@@ -133,6 +125,7 @@ export default function IndexRoute() {
     }
   };
 
+  // 保留原来的同步函数（恢复原来的console.log和提示）
   const syncProductsToShopify = async () => {
     if (products.length === 0) {
       alert("请先获取产品列表");
@@ -142,7 +135,7 @@ export default function IndexRoute() {
     setSyncing(true);
     setSyncResult(null);
     setProgress(0);
-    setSuccessMessage(""); // 清除之前的成功消息
+    setErrors([]);
 
     try {
       const results = [];
@@ -169,6 +162,7 @@ export default function IndexRoute() {
               success: false, 
               error: "JSON解析失败" 
             });
+            console.error(`❌ 产品 ${product.name} 同步失败: JSON解析失败`);
             continue;
           }
 
@@ -178,6 +172,7 @@ export default function IndexRoute() {
               productName: product.name,
               success: true 
             });
+            console.log(`✅ 产品 ${product.name} 同步成功`);
           } else {
             results.push({ 
               productId: product.id, 
@@ -185,6 +180,7 @@ export default function IndexRoute() {
               success: false, 
               error: importData.error || "未知错误" 
             });
+            console.error(`❌ 产品 ${product.name} 同步失败:`, importData.error);
           }
 
         } catch (error) {
@@ -194,6 +190,7 @@ export default function IndexRoute() {
             success: false, 
             error: error.message 
           });
+          console.error(`❌ 产品 ${product.name} 请求失败:`, error.message);
         }
 
         // 更新同步进度
@@ -202,20 +199,24 @@ export default function IndexRoute() {
         
         // 每个产品同步后添加延迟
         if (i < products.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise(resolve => setTimeout(resolve, 500)); // 500ms延迟
         }
       }
 
+      console.log("🎉 同步完成!");
+      
       // 统计结果
       const successCount = results.filter(r => r.success).length;
       const failCount = results.filter(r => !r.success).length;
       
       console.log(`📊 同步统计: ${successCount} 成功, ${failCount} 失败`);
       
-      // 显示同步结果
-      const syncMessage = `✅ 同步完成!\n\n成功: ${successCount} 个\n失败: ${failCount} 个`;
-      setSuccessMessage(syncMessage);
-      alert(syncMessage);
+      if (failCount > 0) {
+        console.log("❌ 失败的产品:");
+        results.filter(r => !r.success).forEach(r => {
+          console.log(`  - ${r.productName}: ${r.error}`);
+        });
+      }
 
       setSyncResult(results);
       setProgress(100);
@@ -234,20 +235,7 @@ export default function IndexRoute() {
         <TextContainer>
           <p>✅ Application started successfully!</p>
 
-          {/* 显示成功消息 */}
-          {successMessage && (
-            <div style={{ 
-              marginBottom: 16, 
-              padding: 12, 
-              backgroundColor: '#d4edda', 
-              color: '#155724',
-              borderRadius: 4,
-              border: '1px solid #c3e6cb'
-            }}>
-              {successMessage}
-            </div>
-          )}
-
+          {/* 新增的输入区域 */}
           <Layout>
             <Layout.Section>
               {/* 模式选择 */}
@@ -337,107 +325,57 @@ export default function IndexRoute() {
                 <Button primary onClick={fetchToken} loading={loadingToken}>
                   Get Token
                 </Button>
+                {/* 新增的获取产品按钮 */}
                 <Button primary onClick={fetchProductsFromAPI} loading={loadingProducts}>
                   {fetchMode === "all" ? "获取产品" : `获取${pagesToFetch || 'N'}页产品`}
                 </Button>
+                {/* 原来的同步按钮 */}
                 <Button primary onClick={syncProductsToShopify} loading={syncing}>
-                  同步到Shopify
+                  Sync to Shopify
                 </Button>
               </div>
 
-              {loadingProducts && (
+              {/* 原有的显示区域 */}
+              {loadingProducts && <p>Loading products... <Spinner size="small" /></p>}
+              {totalCount > 0 && <p>Total products: {totalCount}</p>}
+              {progress > 0 && <ProgressBar progress={progress} size="small" />}
+
+              {products.length > 0 && (
                 <div style={{ marginTop: 16 }}>
-                  <p>正在获取产品... <Spinner size="small" /></p>
-                  {progress > 0 && <ProgressBar progress={progress} size="small" />}
+                  <h3>Product List ({products.length})</h3>
+                  <ul>
+                    {products.map(p => (
+                      <li key={p.id}>{p.name} — {p.id}</li>
+                    ))}
+                  </ul>
                 </div>
               )}
 
-              {totalCount > 0 && (
-                <div style={{ marginTop: 16 }}>
-                  <p>总共产品: {totalCount}</p>
-                  {products.length > 0 && (
-                    <p>当前列表: {products.length} 个产品</p>
-                  )}
+              {errors.length > 0 && (
+                <div style={{ marginTop: 16, color: "red" }}>
+                  <h3>GraphQL Errors ({errors.length})</h3>
+                  <ul>
+                    {errors.map((e, idx) => (
+                      <li key={idx}>{e.message || JSON.stringify(e)}</li>
+                    ))}
+                  </ul>
                 </div>
               )}
 
-              {syncing && progress > 0 && (
+              {syncResult && (
                 <div style={{ marginTop: 16 }}>
-                  <p>同步进度: {progress}%</p>
-                  <ProgressBar progress={progress} size="small" />
+                  <h3>Sync Results</h3>
+                  <ul>
+                    {syncResult.map(r => (
+                      <li key={r.productId}>
+                        {r.productId}: {r.success ? "✅ Success" : `❌ Failed (${r.error})`}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </Layout.Section>
           </Layout>
-
-          {products.length > 0 && (
-            <div style={{ marginTop: 16 }}>
-              <h3>产品列表 ({products.length})</h3>
-              <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid #ddd', padding: 8 }}>
-                <ul>
-                  {products.map(p => (
-                    <li key={p.id} style={{ marginBottom: 4 }}>
-                      <strong>{p.name}</strong> — {p.id}
-                      {p.category && ` (分类: ${p.category.name})`}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              
-              {/* 显示最后产品的cursor，方便下次使用 */}
-              {products.length > 0 && fetchMode === "all" && (
-                <div style={{ marginTop: 16, padding: 8, backgroundColor: '#f5f5f5', borderRadius: 4 }}>
-                  <p style={{ margin: 0, fontSize: '0.9em', color: '#666' }}>
-                    最后cursor: <code style={{ 
-                      display: 'block', 
-                      marginTop: 4, 
-                      padding: 4, 
-                      backgroundColor: '#fff', 
-                      borderRadius: 3,
-                      wordBreak: 'break-all',
-                      fontSize: '0.8em'
-                    }}>
-                      {products[products.length - 1]?.cursor || "未获取cursor"}
-                    </code>
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {errors.length > 0 && (
-            <div style={{ marginTop: 16, color: "red" }}>
-              <h3>GraphQL 错误 ({errors.length})</h3>
-              <ul>
-                {errors.map((e, idx) => (
-                  <li key={idx}>{e.message || JSON.stringify(e)}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {syncResult && (
-            <div style={{ marginTop: 16 }}>
-              <h3>同步结果</h3>
-              <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid #ddd', padding: 8 }}>
-                <ul>
-                  {syncResult.map(r => (
-                    <li key={r.productId} style={{ marginBottom: 4 }}>
-                      {r.productName}: {r.success ? 
-                        <span style={{ color: 'green' }}>✅ 成功</span> : 
-                        <span style={{ color: 'red' }}>❌ 失败 ({r.error})</span>
-                      }
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div style={{ marginTop: 8 }}>
-                <strong>统计:</strong> 
-                成功: {syncResult.filter(r => r.success).length} / 
-                失败: {syncResult.filter(r => !r.success).length}
-              </div>
-            </div>
-          )}
         </TextContainer>
       </Card>
     </Page>
