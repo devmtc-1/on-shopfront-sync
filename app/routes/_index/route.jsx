@@ -27,8 +27,9 @@ export default function IndexRoute() {
   
   // 新增加的输入框状态
   const [startingCursor, setStartingCursor] = useState("");
-  const [pagesToFetch, setPagesToFetch] = useState("1");
+  const [pagesToFetch, setPagesToFetch] = useState("5");
   const [fetchMode, setFetchMode] = useState("all"); // "all" 或 "partial"
+  const [successMessage, setSuccessMessage] = useState(""); // 成功消息
 
   const vendor = "plonk";
 
@@ -43,6 +44,8 @@ export default function IndexRoute() {
       if (!resp.ok) throw new Error(await resp.text());
       const data = await resp.json();
       setToken(data.access_token);
+      setSuccessMessage("Token 获取成功!");
+      setTimeout(() => setSuccessMessage(""), 3000);
     } catch (err) {
       alert("Error fetching token: " + err.message);
     } finally {
@@ -56,6 +59,7 @@ export default function IndexRoute() {
     setErrors([]);
     setTotalCount(0);
     setProgress(0);
+    setSuccessMessage(""); // 清除之前的成功消息
 
     try {
       const categories = categoriesInput
@@ -65,6 +69,7 @@ export default function IndexRoute() {
       
       if (categories.length === 0) {
         alert("请输入至少一个分类ID");
+        setLoadingProducts(false);
         return;
       }
 
@@ -74,24 +79,28 @@ export default function IndexRoute() {
       });
 
       if (fetchMode === "partial") {
-        if (!startingCursor) {
-          alert("部分获取模式下需要输入起始cursor");
-          return;
-        }
         const pages = parseInt(pagesToFetch, 10);
         if (isNaN(pages) || pages < 1 || pages > 100) {
           alert("请输入有效的页数 (1-100)");
+          setLoadingProducts(false);
           return;
         }
-        params.append("startingCursor", startingCursor);
         params.append("pages", pages.toString());
+        
+        // 只有在有cursor时才传startingCursor参数
+        if (startingCursor.trim()) {
+          params.append("startingCursor", startingCursor.trim());
+        }
       }
 
+      console.log(`📥 请求参数: ${params.toString()}`);
+      
       const resp = await fetch(`/shopfront-products?${params.toString()}`);
       const data = await resp.json();
 
       if (data.error) {
         alert("获取产品失败: " + data.error);
+        setLoadingProducts(false);
         return;
       }
 
@@ -104,7 +113,18 @@ export default function IndexRoute() {
       setTotalCount(data.totalCount || fetchedProducts.length);
       setProgress(100);
 
-      alert(`成功获取 ${fetchedProducts.length} 个产品`);
+      const message = `✅ 成功获取 ${fetchedProducts.length} 个产品`;
+      setSuccessMessage(message);
+      console.log(message);
+      
+      // 显示获取结果
+      setTimeout(() => {
+        if (fetchMode === "partial") {
+          alert(`${message}\n\n模式: 部分获取\n起始cursor: ${startingCursor || "第一页"}\n获取页数: ${data.pagesFetched || pagesToFetch}\n总产品数: ${data.totalCount || fetchedProducts.length}`);
+        } else {
+          alert(`${message}\n\n模式: 全部分类产品\n总产品数: ${data.totalCount || fetchedProducts.length}`);
+        }
+      }, 500);
       
     } catch (err) {
       alert("获取产品出错: " + err.message);
@@ -122,6 +142,7 @@ export default function IndexRoute() {
     setSyncing(true);
     setSyncResult(null);
     setProgress(0);
+    setSuccessMessage(""); // 清除之前的成功消息
 
     try {
       const results = [];
@@ -191,6 +212,11 @@ export default function IndexRoute() {
       
       console.log(`📊 同步统计: ${successCount} 成功, ${failCount} 失败`);
       
+      // 显示同步结果
+      const syncMessage = `✅ 同步完成!\n\n成功: ${successCount} 个\n失败: ${failCount} 个`;
+      setSuccessMessage(syncMessage);
+      alert(syncMessage);
+
       setSyncResult(results);
       setProgress(100);
 
@@ -207,6 +233,20 @@ export default function IndexRoute() {
       <Card sectioned>
         <TextContainer>
           <p>✅ Application started successfully!</p>
+
+          {/* 显示成功消息 */}
+          {successMessage && (
+            <div style={{ 
+              marginBottom: 16, 
+              padding: 12, 
+              backgroundColor: '#d4edda', 
+              color: '#155724',
+              borderRadius: 4,
+              border: '1px solid #c3e6cb'
+            }}>
+              {successMessage}
+            </div>
+          )}
 
           <Layout>
             <Layout.Section>
@@ -255,11 +295,11 @@ export default function IndexRoute() {
                   <>
                     <div style={{ marginTop: 16 }}>
                       <TextField
-                        label="起始Cursor"
+                        label="起始Cursor (选填，不填则从第一页开始)"
                         value={startingCursor}
                         onChange={setStartingCursor}
-                        placeholder="输入起始cursor"
-                        helpText="从哪一页开始获取 (可以复制上一次获取的最后cursor)"
+                        placeholder="输入起始cursor，留空则从第一页开始"
+                        helpText="从哪一页开始获取，留空则从第一页开始"
                         disabled={syncing || loadingProducts}
                       />
                     </div>
@@ -267,12 +307,22 @@ export default function IndexRoute() {
                       <TextField
                         label="获取页数"
                         value={pagesToFetch}
-                        onChange={setPagesToFetch}
-                        type="number"
-                        min="1"
-                        max="100"
-                        placeholder="例如: 10"
-                        helpText="要获取多少页 (每页50个产品)"
+                        onChange={(value) => {
+                          // 只允许数字，并且限制在1-100之间
+                          const num = parseInt(value, 10);
+                          if (isNaN(num)) {
+                            setPagesToFetch("");
+                          } else if (num < 1) {
+                            setPagesToFetch("1");
+                          } else if (num > 100) {
+                            setPagesToFetch("100");
+                          } else {
+                            setPagesToFetch(value);
+                          }
+                        }}
+                        type="text" // 使用text类型避免上下箭头
+                        placeholder="例如: 5"
+                        helpText="要获取多少页 (每页50个产品，范围: 1-100)"
                         disabled={syncing || loadingProducts}
                       />
                     </div>
@@ -288,7 +338,7 @@ export default function IndexRoute() {
                   Get Token
                 </Button>
                 <Button primary onClick={fetchProductsFromAPI} loading={loadingProducts}>
-                  {fetchMode === "all" ? "获取产品" : `获取${pagesToFetch}页产品`}
+                  {fetchMode === "all" ? "获取产品" : `获取${pagesToFetch || 'N'}页产品`}
                 </Button>
                 <Button primary onClick={syncProductsToShopify} loading={syncing}>
                   同步到Shopify
