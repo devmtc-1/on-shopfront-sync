@@ -13,8 +13,8 @@ export async function loader({ request }) {
   const url = new URL(request.url);
   const categoriesParam = url.searchParams.get("categories");
   const fetchMode = url.searchParams.get("fetchMode") || "all";
-  const startingCursor = url.searchParams.get("startingCursor");
-  const pagesParam = url.searchParams.get("pages");
+  const startingCursor = url.searchParams.get("startingCursor") || "";
+  const pagesParam = url.searchParams.get("pages") || "1";
   
   let CATEGORY_IDS = [];
   if (categoriesParam) {
@@ -33,6 +33,7 @@ export async function loader({ request }) {
   }
 
   const fetchProducts = async (accessToken, first = 50, after = null) => {
+    console.log(`🔄 Fetching products with cursor: ${after || 'first page'}`);
     return fetch(`https://${vendor}.onshopfront.com/api/v2/graphql`, {
       method: "POST",
       headers: {
@@ -82,16 +83,23 @@ export async function loader({ request }) {
   };
 
   try {
-    if (fetchMode === "partial" && startingCursor) {
+    if (fetchMode === "partial") {
       // 部分获取模式：获取指定cursor开始的N页
-      const pages = parseInt(pagesParam || "1", 10);
-      let cursor = startingCursor;
+      const pages = parseInt(pagesParam, 10);
+      if (isNaN(pages) || pages < 1 || pages > 100) {
+        return json({ 
+          error: "页数必须是1-100之间的数字" 
+        }, { status: 400 });
+      }
+      
+      let cursor = startingCursor.trim() || null; // 如果没填cursor，则从第一页开始
       let allEdges = [];
       let totalCount = 0;
       let pageCount = 0;
       
       for (let i = 0; i < pages; i++) {
-        console.log(`📄 获取第 ${i + 1} 页, cursor: ${cursor}`);
+        pageCount++;
+        console.log(`📄 获取第 ${pageCount} 页, cursor: ${cursor || '第一页'}`);
         
         const resp = await fetchProducts(tokens.access_token, 50, cursor);
         const text = await resp.text();
@@ -100,14 +108,14 @@ export async function loader({ request }) {
           data = JSON.parse(text);
         } catch (err) {
           return json({
-            error: `第 ${i + 1} 页返回非 JSON`,
+            error: `第 ${pageCount} 页返回非 JSON`,
             raw: text
           }, { status: 500 });
         }
 
         if (!data.data || !data.data.products) {
           return json({
-            error: `第 ${i + 1} 页未返回 products 字段`,
+            error: `第 ${pageCount} 页未返回 products 字段`,
             raw: data
           }, { status: 500 });
         }
@@ -118,22 +126,21 @@ export async function loader({ request }) {
         allEdges.push(...edges);
         
         // 只在第一页获取总数
-        if (i === 0 && data.data.products.totalCount) {
+        if (pageCount === 1 && data.data.products.totalCount) {
           totalCount = data.data.products.totalCount;
         }
         
         // 如果没有下一页，停止获取
         if (!pageInfo.hasNextPage) {
-          pageCount = i + 1;
           console.log(`✅ 已到最后一页，共获取 ${pageCount} 页`);
           break;
         }
         
-        cursor = pageInfo.endCursor;
-        pageCount = i + 1;
+        cursor = pageInfo.endCursor || null;
         
         // 添加延迟避免速率限制
-        if (i < pages - 1) {
+        if (i < pages - 1 && pageInfo.hasNextPage) {
+          console.log("⏳ 等待2秒后获取下一页...");
           await new Promise(resolve => setTimeout(resolve, 2000));
         }
       }
@@ -141,12 +148,12 @@ export async function loader({ request }) {
       return json({
         ok: true,
         mode: "partial",
-        startingCursor,
+        startingCursor: startingCursor || "第一页",
         pagesRequested: pages,
         pagesFetched: pageCount,
         count: allEdges.length,
         products: allEdges,
-        totalCount,
+        totalCount: totalCount || allEdges.length,
         categories: CATEGORY_IDS,
         lastCursor: allEdges.length > 0 ? allEdges[allEdges.length - 1].cursor : null
       });
@@ -161,7 +168,7 @@ export async function loader({ request }) {
 
       while (hasNextPage) {
         pageCount++;
-        console.log(`📄 获取第 ${pageCount} 页, cursor: ${cursor ? cursor.substring(0, 20) + '...' : '第一页' }`);
+        console.log(`📄 获取第 ${pageCount} 页, cursor: ${cursor || '第一页'}`);
         
         const resp = await fetchProducts(tokens.access_token, 50, cursor);
         const text = await resp.text();
@@ -198,6 +205,7 @@ export async function loader({ request }) {
 
         // 添加延迟避免速率限制
         if (hasNextPage) {
+          console.log("⏳ 等待2秒后获取下一页...");
           await new Promise(resolve => setTimeout(resolve, 2000));
         }
       }
