@@ -8,8 +8,7 @@ import {
   ProgressBar, 
   Spinner,
   TextField,
-  Layout,
-  Stack
+  Layout
 } from "@shopify/polaris";
 
 export default function IndexRoute() {
@@ -213,34 +212,34 @@ export default function IndexRoute() {
             <Layout.Section>
               {/* 模式选择 */}
               <div style={{ marginBottom: 16 }}>
-                <Stack vertical>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: 8, fontWeight: 'bold' }}>
-                      获取模式:
+                <div>
+                  <label style={{ display: 'block', marginBottom: 8, fontWeight: 'bold' }}>
+                    获取模式:
+                  </label>
+                  <div style={{ display: 'flex', gap: 16 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input
+                        type="radio"
+                        checked={fetchMode === "all"}
+                        onChange={() => setFetchMode("all")}
+                        disabled={syncing || loadingProducts}
+                      />
+                      获取全部分类产品
                     </label>
-                    <div style={{ display: 'flex', gap: 16 }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <input
-                          type="radio"
-                          checked={fetchMode === "all"}
-                          onChange={() => setFetchMode("all")}
-                          disabled={syncing || loadingProducts}
-                        />
-                        获取全部分类产品
-                      </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <input
-                          type="radio"
-                          checked={fetchMode === "partial"}
-                          onChange={() => setFetchMode("partial")}
-                          disabled={syncing || loadingProducts}
-                        />
-                        部分获取 (指定cursor)
-                      </label>
-                    </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input
+                        type="radio"
+                        checked={fetchMode === "partial"}
+                        onChange={() => setFetchMode("partial")}
+                        disabled={syncing || loadingProducts}
+                      />
+                      部分获取 (指定cursor)
+                    </label>
                   </div>
+                </div>
 
-                  {/* 分类ID输入框 */}
+                {/* 分类ID输入框 */}
+                <div style={{ marginTop: 16 }}>
                   <TextField
                     label="分类ID (多个用逗号分隔)"
                     value={categoriesInput}
@@ -249,10 +248,12 @@ export default function IndexRoute() {
                     helpText="输入要同步的分类ID，多个ID用逗号分隔"
                     disabled={syncing || loadingProducts}
                   />
+                </div>
 
-                  {/* 部分获取模式的额外输入框 */}
-                  {fetchMode === "partial" && (
-                    <>
+                {/* 部分获取模式的额外输入框 */}
+                {fetchMode === "partial" && (
+                  <>
+                    <div style={{ marginTop: 16 }}>
                       <TextField
                         label="起始Cursor"
                         value={startingCursor}
@@ -261,6 +262,8 @@ export default function IndexRoute() {
                         helpText="从哪一页开始获取 (可以复制上一次获取的最后cursor)"
                         disabled={syncing || loadingProducts}
                       />
+                    </div>
+                    <div style={{ marginTop: 16 }}>
                       <TextField
                         label="获取页数"
                         value={pagesToFetch}
@@ -272,9 +275,9 @@ export default function IndexRoute() {
                         helpText="要获取多少页 (每页50个产品)"
                         disabled={syncing || loadingProducts}
                       />
-                    </>
-                  )}
-                </Stack>
+                    </div>
+                  </>
+                )}
               </div>
 
               <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
