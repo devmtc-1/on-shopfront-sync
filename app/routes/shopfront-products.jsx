@@ -16,12 +16,31 @@ export async function loader({ request }) {
   const pagesParam = url.searchParams.get("pages") || "1";
   
   // 硬编码的产品ID数组 - 请在这里填写您要查询的产品ID
-  const PRODUCT_IDS = [
-    "11f0a5759d6c8c989c790aca86935c09",  // 示例ID，请替换为实际ID
-    "11f036c2624007e88ea20aa2aa007b95",  // 示例ID，请替换为实际ID
-    "11f036b9f10b1fac99770aa2aa007b95",  // 示例ID，请替换为实际ID
-    // 添加更多产品ID...
-  ];
+const PRODUCT_IDS = [
+  "11f098e9b9fb353cbdcf06760bc1ba93",
+  "11f099b80f5e0058ab79063094aff5bf",
+  "11ef8131947e39f688470a1f4ac5468b",
+  "11ef8133d42217baa42e0a61ef0b33db",
+  "11ef8134033bd81087fe0a1f4ac5468b",
+  "11ef8134c164cd2e98a602e7f7aebf81",
+  "11ef81357475175cb76502e7f7aebf81",
+  "11ef8135b5e3b748b67b02e7f7aebf81",
+  "11ef81e84808fa90a6a9026d6c0c2051",
+  "11ef82117f4c2b8eb91f026d6c0c2051",
+  "11ef835e3bbf452e8ef0026d6c0c2051",
+  "11ef8361cda65df8bdf50af5072670f1",
+  "11ef8362009597568b990af5072670f1",
+  "11ef83625033d8aea8fa0af5072670f1",
+  "11ef83628343d0009042026d6c0c2051",
+  "11ef8362ab7d09b0ab0e026d6c0c2051",
+  "11ef838d574e9090b7b50af5072670f1",
+  "11ef8697b08469668a0d0274308c35cb",
+  "11ef91aa9230adbc81b50ad0c2dd1a97",
+  "11ef91b554fbbf8ab0bd02e316387ad7",
+  "11efa212dc8a7d988e6a0a74731cd04b",
+  "11efa24199b68640b86b020b9602f431",
+  "11efa86286a55d48979a02c64abc840b"
+];
 
   const fetchProducts = async (accessToken, first = 50, after = null) => {
     console.log(`🔄 Fetching products with cursor: ${after || 'first page'}`);
