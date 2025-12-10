@@ -11,29 +11,35 @@ export async function loader({ request }) {
   }
 
   const url = new URL(request.url);
-  const categoriesParam = url.searchParams.get("categories");
   const fetchMode = url.searchParams.get("fetchMode") || "all";
   const startingCursor = url.searchParams.get("startingCursor") || "";
   const pagesParam = url.searchParams.get("pages") || "1";
   
-  let CATEGORY_IDS = [];
-  if (categoriesParam) {
-    CATEGORY_IDS = categoriesParam
-      .split(',')
-      .map(id => id.trim())
-      .filter(id => id.length > 0);
-  }
-  
-  if (CATEGORY_IDS.length === 0) {
-    CATEGORY_IDS = [
-      "11e96ba509ddf5a487c00ab419c1109c",
-      "11e718d3cac71ecaa6100a1468096c0d",
-      "11e718d4766d6630bb9e0a1468096c0d",
-    ];
-  }
+  // 硬编码的产品ID数组 - 请在这里填写您要查询的产品ID
+  const PRODUCT_IDS = [
+    "11f0a5759d6c8c989c790aca86935c09",  // 示例ID，请替换为实际ID
+    "11f036c2624007e88ea20aa2aa007b95",  // 示例ID，请替换为实际ID
+    "11f036b9f10b1fac99770aa2aa007b95",  // 示例ID，请替换为实际ID
+    // 添加更多产品ID...
+  ];
 
   const fetchProducts = async (accessToken, first = 50, after = null) => {
     console.log(`🔄 Fetching products with cursor: ${after || 'first page'}`);
+    
+    // 构建 GraphQL 查询变量
+    const variables = {
+      first: first,
+      statuses: ["ACTIVE"]
+    };
+    
+    // 如果有游标，添加游标参数
+    if (after) {
+      variables.after = after;
+    }
+    
+    // 始终使用硬编码的产品ID数组
+    variables.products = PRODUCT_IDS;
+    
     return fetch(`https://${vendor}.onshopfront.com/api/v2/graphql`, {
       method: "POST",
       headers: {
@@ -44,8 +50,8 @@ export async function loader({ request }) {
       },
       body: JSON.stringify({
         query: `
-{
-  products(first: ${first}${after ? `, after: "${after}"` : ""}, categories: ${JSON.stringify(CATEGORY_IDS)}, statuses: [ACTIVE]) {
+query GetProducts($first: Int, $after: Cursor, $products: [ID], $statuses: [ProductStatusEnum]) {
+  products(first: $first, after: $after, products: $products, statuses: $statuses) {
     edges {
       cursor
       node {
@@ -77,7 +83,8 @@ export async function loader({ request }) {
     totalCount
   }
 }
-        `
+        `,
+        variables: variables
       })
     });
   };
@@ -154,7 +161,7 @@ export async function loader({ request }) {
         count: allEdges.length,
         products: allEdges,
         totalCount: totalCount || allEdges.length,
-        categories: CATEGORY_IDS,
+        productsIds: PRODUCT_IDS,
         lastCursor: allEdges.length > 0 ? allEdges[allEdges.length - 1].cursor : null
       });
 
@@ -217,7 +224,7 @@ export async function loader({ request }) {
         count: allEdges.length,
         products: allEdges,
         totalCount,
-        categories: CATEGORY_IDS,
+        productsIds: PRODUCT_IDS,
         lastCursor: allEdges.length > 0 ? allEdges[allEdges.length - 1].cursor : null,
         errors: null
       });
