@@ -17,6 +17,7 @@ export async function loader({ request }) {
   
   // 硬编码的产品ID数组 - 请在这里填写您要查询的产品ID
 const PRODUCT_IDS = [
+  "11efbdc6f0b831b485150a59d21dd177",
   "11edce9326de654482c502cf268bcfdc",
   "11edd9831fcc33089fb60604c452ea72",
   "11edd9b22082915ab0920604c452ea72",
