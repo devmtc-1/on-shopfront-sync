@@ -3,7 +3,7 @@ import { getTokens } from "./shopfrontTokens.server";
 
 export async function registerShopfrontWebhooks(webhookUrl) {
   const vendor = "plonk";
-  const tokens = getTokens(vendor);
+  const tokens = await getTokens(vendor);
   
   if (!tokens?.access_token) throw new Error("请先完成授权");
 
