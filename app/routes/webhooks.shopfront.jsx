@@ -67,24 +67,57 @@ async function getProductFromOnshopfront(productId) {
     throw new Error("请先完成Onshopfront授权");
   }
 
-  const query = `
-    {
-      product(id: "${productId}") {
+const query = `
+  query GetProduct($id: ID!) {
+    product(id: $id) {
+      id
+      name
+      description
+      status
+      type
+      category { id name }
+      brand { id name }
+      tags { id name }
+      image
+      alternateImages
+      createdAt
+      updatedAt
+      prices { 
+        quantity 
+        price 
+        priceEx 
+        decimalPlaceLength 
+        priceSet { id name } 
+      }
+      barcodes { 
+        code 
+        quantity 
+        lastSoldAt 
+        promotionPrice 
+        outletPromotionPrices { 
+          outlet { id name } 
+          price 
+        } 
+      }
+      inventory { 
+        outlet { id name } 
+        quantity 
+        singleLevel 
+        caseLevel 
+        reorderLevel 
+        reorderAmount 
+        maxQuantity 
+      }
+      additionalFields {
         id
         name
-        description
-        status
+        safeName
         type
-        category { id name }
-        brand { id name }
-        image
-        alternateImages
-        prices { quantity price priceEx decimalPlaceLength priceSet { id name } }
-        barcodes { code quantity lastSoldAt promotionPrice outletPromotionPrices { outlet { id name } price } }
-        inventory { outlet { id name } quantity singleLevel caseLevel reorderLevel reorderAmount maxQuantity }
+        value
       }
     }
-  `;
+  }
+`;
 
   const response = await fetch(`https://${vendor}.onshopfront.com/api/v2/graphql`, {
     method: "POST",
