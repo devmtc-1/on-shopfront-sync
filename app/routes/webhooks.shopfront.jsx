@@ -89,24 +89,57 @@ async function getProductFromOnshopfront(productId) {
 
   console.log("✅ 获取到有效token，开始查询产品...");
 
-  const query = `
-    {
-      product(id: "${productId}") {
+const query = `
+  {
+    product(id: "${productId}") {
+      id
+      name
+      description
+      status
+      type
+      category { id name }
+      brand { id name }
+      tags { id name }
+      image
+      alternateImages
+      createdAt
+      updatedAt
+      prices { 
+        quantity 
+        price 
+        priceEx 
+        decimalPlaceLength 
+        priceSet { id name } 
+      }
+      barcodes { 
+        code 
+        quantity 
+        lastSoldAt 
+        promotionPrice 
+        outletPromotionPrices { 
+          outlet { id name } 
+          price 
+        } 
+      }
+      inventory { 
+        outlet { id name } 
+        quantity 
+        singleLevel 
+        caseLevel 
+        reorderLevel 
+        reorderAmount 
+        maxQuantity 
+      }
+      additionalFields {
         id
         name
-        description
-        status
+        safeName
         type
-        category { id name }
-        brand { id name }
-        image
-        alternateImages
-        prices { quantity price priceEx decimalPlaceLength priceSet { id name } }
-        barcodes { code quantity lastSoldAt promotionPrice outletPromotionPrices { outlet { id name } price } }
-        inventory { outlet { id name } quantity singleLevel caseLevel reorderLevel reorderAmount maxQuantity }
+        value
       }
     }
-  `;
+  }
+`;
 
   console.log(`🌐 查询产品 ${productId}...`);
   
