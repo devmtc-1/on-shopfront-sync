@@ -2,7 +2,7 @@ import { json } from "@remix-run/node";
 import fetch from "node-fetch";
 
 // 导入数据库连接（需要先创建这个文件）
-import { query } from "../../lib/db.server.js";
+import { query } from "../lib/db.server.js";
 
 // 从数据库获取token
 const getTokensFromDB = async (vendor) => {
