@@ -126,7 +126,10 @@ const query = `
       "Content-Type": "application/json",
       "Accept": "application/json",
     },
-    body: JSON.stringify({ query })
+    body: JSON.stringify({ 
+      query,
+      variables: { id: productId }  // ✅ 关键修复：添加变量
+    })
   });
 
   const text = await response.text();
