@@ -5,8 +5,18 @@ import { getTokens } from "../utils/shopfrontTokens.server";
 
 export async function loader({ request }) {
   const vendor = "plonk";
-  let tokens = getTokens(vendor);
+  
+  // ⚠️ 关键修改：添加 await，因为 getTokens 现在是异步函数了！
+  let tokens = await getTokens(vendor);
+  
+  console.log("🔍 [shopfront-products] Token获取结果:", {
+    获取到token: !!tokens,
+    access_token长度: tokens?.access_token?.length,
+    expires_in: tokens?.expires_in
+  });
+  
   if (!tokens?.access_token) {
+    console.error("❌ [shopfront-products] 没有有效的access_token");
     return json({ error: "请先完成授权" }, { status: 401 });
   }
 
